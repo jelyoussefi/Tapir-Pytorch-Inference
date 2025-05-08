@@ -1,19 +1,20 @@
 import numpy as np
 import torch
+import intel_extension_for_pytorch as ipex
 from torch import nn
 from tapnet.tapir_model import TAPIR
 from tapnet.utils import get_query_features, postprocess_occlusions, preprocess_frame
-
 
 def build_model(model_path: str, input_resolution: tuple[int, int], num_pips_iter: int, use_casual_conv: bool,
                 device: torch.device):
     model = TAPIR(use_casual_conv=use_casual_conv, num_pips_iter=num_pips_iter,
                   initial_resolution=input_resolution, device=device)
-    model.load_state_dict(torch.load(model_path, weights_only=True))
+    model.load_state_dict(torch.load(model_path, weights_only=True, map_location=torch.device('cpu')))
     model = model.to(device)
     model = model.eval()
+    # Optimize model with IPEX
+    model = ipex.optimize(model, dtype=torch.float32)
     return model
-
 
 class TapirPredictor(nn.Module):
     def __init__(self, model: TAPIR):
@@ -34,7 +35,6 @@ class TapirPredictor(nn.Module):
         visibles = postprocess_occlusions(occlusions, expected_dist)
         return tracks, visibles, causal_context, feature_grid, hires_feats_grid
 
-
 class TapirPointEncoder(nn.Module):
     def __init__(self, model: TAPIR):
         super().__init__()
@@ -43,7 +43,6 @@ class TapirPointEncoder(nn.Module):
     @torch.no_grad()
     def forward(self, query_points, feature_grid, hires_feats_grid):
         return get_query_features(query_points, feature_grid, hires_feats_grid)
-
 
 class TapirInference(nn.Module):
     def __init__(self, model_path: str, input_resolution: tuple[int, int], num_pips_iter: int, device: torch.device):
@@ -68,7 +67,7 @@ class TapirInference(nn.Module):
         query_points = torch.tensor(query_points).to(self.device)
 
         num_points = query_points.shape[0]
-        causal_state_shape = (self.model.num_pips_iter,  self.model.num_mixer_blocks, num_points, 2, 512 + 2048)
+        causal_state_shape = (self.model.num_pips_iter, self.model.num_mixer_blocks, num_points, 2, 512 + 2048)
         self.causal_state = torch.zeros(causal_state_shape, dtype=torch.float32, device=self.device)
         query_feats = torch.zeros((1, num_points, 256), dtype=torch.float32, device=self.device)
         hires_query_feats = torch.zeros((1, num_points, 128), dtype=torch.float32, device=self.device)

@@ -208,7 +208,7 @@ def get_query_features(query_points: torch.Tensor,
 
 def draw_points(frame, points, visible, colors):
 
-    point_size = min(frame.shape[0], frame.shape[1]) // 300
+    point_size = min(frame.shape[0], frame.shape[1]) // 100
 
     for i in range(points.shape[0]):
         if not visible[i]:
