@@ -1,3 +1,16 @@
+# Suppress TensorFlow and IPEX warnings before any imports
+import os
+os.environ['TF_ENABLE_ONEDNN_OPTS'] = '0'  # Disable oneDNN optimizations
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'   # Suppress TensorFlow logs
+os.environ['PYTORCH_IPEX_VERBOSE'] = '0'   # Suppress IPEX verbose output
+import logging
+logging.getLogger('torch').setLevel(logging.ERROR)
+logging.getLogger('intel_extension_for_pytorch').setLevel(logging.ERROR)
+logging.getLogger().setLevel(logging.ERROR)  # Suppress IPEX info logs
+import warnings
+warnings.filterwarnings('ignore', category=UserWarning, module='tensorflow')
+warnings.filterwarnings('ignore', category=FutureWarning, module='intel_extension_for_pytorch')
+
 import numpy as np
 import torch
 import intel_extension_for_pytorch as ipex
