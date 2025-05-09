@@ -15,18 +15,26 @@
 
 """Pytorch model utilities."""
 
-# Suppress TensorFlow and IPEX warnings before any imports
+# Suppress TensorFlow, IPEX, and ONNX warnings before any imports
 import os
 os.environ['TF_ENABLE_ONEDNN_OPTS'] = '0'  # Disable oneDNN optimizations
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'   # Suppress TensorFlow logs
+os.environ['TF_LOGGING'] = '0'            # Additional TensorFlow suppression
+os.environ['TF_CUDNN_LOGGING_LEVEL'] = '3' # Suppress cuDNN logs
+os.environ['TF_FORCE_GPU_ALLOW_GROWTH'] = 'true'  # Prevent GPU memory issues
 os.environ['PYTORCH_IPEX_VERBOSE'] = '0'   # Suppress IPEX verbose output
+os.environ['TORCH_CPP_LOG_LEVEL'] = 'ERROR'  # Suppress PyTorch C++ logs
+os.environ['QT_LOGGING_RULES'] = 'qt5ct.debug=false'  # Suppress Qt/Wayland warnings
 import logging
+logging.getLogger('tensorflow').setLevel(logging.FATAL)  # Stronger TensorFlow suppression
 logging.getLogger('torch').setLevel(logging.ERROR)
 logging.getLogger('intel_extension_for_pytorch').setLevel(logging.ERROR)
 logging.getLogger().setLevel(logging.ERROR)  # Suppress IPEX info logs
 import warnings
 warnings.filterwarnings('ignore', category=UserWarning, module='tensorflow')
 warnings.filterwarnings('ignore', category=FutureWarning, module='intel_extension_for_pytorch')
+warnings.filterwarnings('ignore', category=UserWarning, module='torch.onnx')
+warnings.filterwarnings('ignore', category=Warning, module='torch.jit')
 
 import colorsys
 from typing import Sequence
@@ -227,66 +235,3 @@ def draw_tracks(frame, tracks, point_colors, draw_static=False):
         for i in range(1, num_valid_tracks):
             cv2.line(draw_image, tuple(track[i - 1].astype(int)), tuple(track[i].astype(int)), color, line_thickness)
     return cv2.addWeighted(draw_image, 0.4, frame, 0.6, 0)
-
-def export_to_onnx(
-    predictor,
-    encoder,
-    input_frame,
-    query_points,
-    feature_grid,
-    hires_feats_grid,
-    query_feats,
-    hires_query_feats,
-    causal_state,
-    output_dir,
-    predictor_onnx_path,
-    encoder_onnx_path,
-    dynamic=False
-):
-    """Export TapirPredictor and TapirPointEncoder to ONNX format."""
-    os.makedirs(output_dir, exist_ok=True)
-
-    encode_dynamic = None
-    tapir_dynamic = None
-    if dynamic:
-        encode_dynamic = {
-            'query_points': {1: 'num_points'},
-            'query_feats': {1: 'num_points'},
-            'hires_query_feats': {1: 'num_points'}
-        }
-        tapir_dynamic = {
-            'query_feats': {1: 'num_points'},
-            'hires_query_feats': {1: 'num_points'},
-            'causal_state': {2: 'num_points'},
-            'tracks': {1: 'num_points'},
-            'visibles': {1: 'num_points'},
-            'new_causal_state': {2: 'num_points'}
-        }
-
-    # Export encoder
-    torch.onnx.export(
-        encoder,
-        (query_points[None], feature_grid, hires_feats_grid),
-        encoder_onnx_path,
-        verbose=False,
-        input_names=['query_points', 'feature_grid', 'hires_feats_grid'],
-        output_names=['query_feats', 'hires_query_feats'],
-        dynamic_axes=encode_dynamic
-    )
-
-    # Export predictor
-    torch.onnx.export(
-        predictor,
-        (input_frame, query_feats, hires_query_feats, causal_state),
-        predictor_onnx_path,
-        verbose=False,
-        input_names=['input_frame', 'query_feats', 'hires_query_feats', 'causal_state'],
-        output_names=['tracks', 'visibles', 'new_causal_state', 'feature_grid', 'hires_feats_grid'],
-        dynamic_axes=tapir_dynamic
-    )
-
-    # Simplify models
-    model_simp, check = simplify(encoder_onnx_path)
-    onnx.save(model_simp, encoder_onnx_path)
-    model_simp, check = simplify(predictor_onnx_path)
-    onnx.save(model_simp, predictor_onnx_path)
