@@ -41,7 +41,7 @@ run: 	build
 	@xhost +local:docker
 	@echo "🚀 Running Tapir Inference demo ..."
 	@docker run $(DOCKER_RUN_PARAMS) bash -c \
-		"python3 ./example_video_tracking.py -m tapir.onnx -e tapir_pointencoder.onnx -i ./videos/streat.mp4 -d ${DEVICE} -ov"
+		"python3 ./example_video_tracking.py -m ./models/causal_bootstapir_checkpoint.pt -i ./videos/streat.mp4 -d ${DEVICE}"
 
 run2: 	build
 	@xhost +local:docker
