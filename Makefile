@@ -2,9 +2,10 @@
 SHELL := /bin/bash
 CURRENT_DIR := $(shell dirname $(realpath $(lastword $(MAKEFILE_LIST))))
 CACHE_DIR := $(CURRENT_DIR)/.cache
-MODELS_DIR := /workspace/models
+DATASET_DIR := /workspace/dataset
 
-DEVICE ?= GPU
+
+DEVICE ?= CPU
 
 
 # Docker Configuration
@@ -29,7 +30,7 @@ DOCKER_BUILD_PARAMS := \
 	-t $(DOCKER_IMAGE_NAME) . 
 
 # Targets
-.PHONY: default build run bash models
+.PHONY: default build run bash dataset models
 
 default: fp32
 
@@ -47,13 +48,22 @@ int8: 	build
 	@xhost +local:docker
 	@echo "🚀 Running Tapir Inference demo ..."
 	docker run $(DOCKER_RUN_PARAMS) bash -c \
-		"python3 ./example_video_tracking.py -m ./models/causal_bootstapir_checkpoint_int8.pt -i ./videos/streat.mp4 -d ${DEVICE} -p INT8"
+		"python3 ./example_video_tracking.py -m ./models/causal_bootstapir_checkpoint_int8.pt -d ${DEVICE} -p INT8"
+
+dataset:
+	@docker run $(DOCKER_RUN_PARAMS) bash -c \
+		"./prepare_dataset.sh ${DATASET_DIR}"
 
 
 quantize: 	build
 	@echo "🚀 Quantizing ..."
 	docker run $(DOCKER_RUN_PARAMS) bash -c \
 		"python3 ./quantize.py -m ./models/causal_bootstapir_checkpoint.pt "
+
+eval: 	build
+	@echo "🚀 Evaluating ..."
+	@docker run $(DOCKER_RUN_PARAMS) bash -c \
+		"python3 ./eval.py -m ./models/causal_bootstapir_checkpoint.pt --device ${DEVICE}"
 
 bash: build
 	@echo "🐚 Starting bash in container ..."

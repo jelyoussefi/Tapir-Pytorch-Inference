@@ -43,7 +43,7 @@ if __name__ == '__main__':
     if args.precision == 'INT8' and str(device).startswith('xpu'):
         print("Note: Using INT8 model on XPU - quantized operators will run on CPU with inputs/outputs on XPU")
 
-    input_size = 480
+    input_size = 256
     num_points = 100
     num_iters = 4  # Use 1 for faster inference, and 4 for better results
 

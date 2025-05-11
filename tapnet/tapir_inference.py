@@ -106,7 +106,7 @@ class TapirInference(nn.Module):
         self.query_feats = torch.zeros((1, self.num_points, 256), dtype=torch.float32, device=self.device)
         self.hires_query_feats = torch.zeros((1, self.num_points, 128), dtype=torch.float32, device=self.device)
 
-    def set_points(self, frame: np.ndarray, query_points: np.ndarray, debug: bool = False):
+    def set_points(self, frame: np.ndarray, query_points: np.ndarray, preprocess: bool = True):
         query_points = query_points.astype(np.float32)
         query_points[..., 0] = query_points[..., 0] / self.input_resolution[1]
         query_points[..., 1] = query_points[..., 1] / self.input_resolution[0]
@@ -119,11 +119,12 @@ class TapirInference(nn.Module):
         query_feats = torch.zeros((1, num_points, 256), dtype=torch.float32, device=self.device)
         hires_query_feats = torch.zeros((1, num_points, 128), dtype=torch.float32, device=self.device)
 
-        input_frame = preprocess_frame(frame, resize=self.input_resolution, device=self.device)
+        if preprocess:
+            input_frame = preprocess_frame(frame, resize=self.input_resolution, device=self.device)
+        else:
+            input_frame = frame
 
         try:
-            print(f"Running initial inference to get feature grids...")
-            print("Input tensor devices:", input_frame.device, query_feats.device, hires_query_feats.device, self.causal_state.device)
             if self.is_quantized:
                 tracks, visibles, causal_state, feature_grid, hires_feats_grid = self.predictor(
                     input_frame, query_feats, hires_query_feats, self.causal_state
@@ -132,9 +133,7 @@ class TapirInference(nn.Module):
                 _, _, _, feature_grid, hires_feats_grid = self.predictor(
                     input_frame, query_feats, hires_query_feats, self.causal_state
                 )
-            print(f"Feature grids extracted successfully.")
 
-            print(f"Computing query features...")
             if self.is_quantized:
                 feature_grid = feature_grid.to(query_points.device)
                 hires_feats_grid = hires_feats_grid.to(query_points.device)
@@ -145,7 +144,6 @@ class TapirInference(nn.Module):
                 self.query_feats, self.hires_query_feats = self.encoder(
                     query_points[None], feature_grid, hires_feats_grid
                 )
-            print(f"Query features computed successfully.")
 
         except Exception as e:
             print(f"Error during initialization: {type(e).__name__}: {e}")

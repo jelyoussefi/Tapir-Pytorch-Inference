@@ -33,7 +33,10 @@ RUN pip install --no-cache-dir "numpy<2.0.0" cap_from_youtube onnx onnxruntime o
 
 RUN apt update
 RUN apt install -y libqt5widgets5
-
+RUN pip install tqdm
+RUN pip install pandas
+RUN pip install matplotlib
+RUN pip install seaborn
 # ----------------------------
 # 9. Set working directory
 # ----------------------------
