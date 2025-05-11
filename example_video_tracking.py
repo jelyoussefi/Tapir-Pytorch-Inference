@@ -15,6 +15,8 @@ def select_device(device_arg):
         return torch.device('cpu')
     elif device_arg.lower() == 'gpu':
         if torch.xpu.is_available():
+            # For INT8 models, we'll handle device management differently
+            # in tapir_inference.py, but still select the device here
             return torch.device('xpu')
         elif torch.cuda.is_available():
             return torch.device('cuda')
@@ -29,11 +31,17 @@ if __name__ == '__main__':
     parser.add_argument('-m', '--model', type=str, required=True, help='Path to model file (.pt for PyTorch)')
     parser.add_argument('-i', '--input', type=str, required=True, help='Path to input video file or YouTube URL')
     parser.add_argument('-d', '--device', type=str, default='GPU', choices=['CPU', 'GPU'], help='Device to run the model on: CPU or GPU')
+    parser.add_argument('-p', '--precision', type=str, default='FP32', choices=['FP32', 'INT8'], help='Model precision: FP32 or INT8')
+    parser.add_argument('-v', '--verbose', action='store_true', help='Enable verbose output')
     args = parser.parse_args()
 
     # Set device
     device = select_device(args.device)
     print(f"Using device: {device}")
+    
+    # Special handling for INT8 models on XPU
+    if args.precision == 'INT8' and str(device).startswith('xpu'):
+        print("Note: Using INT8 model on XPU - quantized operators will run on CPU with inputs/outputs on XPU")
 
     input_size = 480
     num_points = 100
@@ -48,16 +56,29 @@ if __name__ == '__main__':
     cap.set(cv2.CAP_PROP_POS_FRAMES, start_time * cap.get(cv2.CAP_PROP_FPS))
 
     # Initialize model
-    tapir = TapirInference(args.model, (input_size, input_size), num_iters, device)
+    try:
+        print(f"Initializing TAPIR model with precision {args.precision}...")
+        tapir = TapirInference(args.model, (input_size, input_size), num_iters, device, args.precision)
+        print("Model initialized successfully")
+    except Exception as e:
+        print(f"Error initializing model: {e}")
+        raise
 
     # Initialize query features
-    query_points = utils.sample_grid_points(input_size, input_size, num_points)
-    point_colors = utils.get_colors(num_points)
-    ret, frame = cap.read()
-    if not ret:
-        raise RuntimeError("Failed to read the first frame")
+    try:
+        print("Initializing query points...")
+        query_points = utils.sample_grid_points(input_size, input_size, num_points)
+        point_colors = utils.get_colors(num_points)
+        ret, frame = cap.read()
+        if not ret:
+            raise RuntimeError("Failed to read the first frame")
 
-    tapir.set_points(frame, query_points)
+        print("Setting initial points...")
+        tapir.set_points(frame, query_points)
+        print("Initial points set successfully")
+    except Exception as e:
+        print(f"Error setting initial points: {e}")
+        raise
 
     # Reset video to the beginning
     cap.set(cv2.CAP_PROP_POS_FRAMES, start_time * cap.get(cv2.CAP_PROP_FPS))
@@ -75,9 +96,17 @@ if __name__ == '__main__':
         ret, frame = cap.read()
         if not ret:
             break
-
+        
+        if args.verbose:
+            print(f"Frame shape: {frame.shape}")
+            
         height, width = frame.shape[:2]
-        tracks_out, visibles = tapir(frame)
+        
+        try:
+            tracks_out, visibles = tapir(frame)
+        except Exception as e:
+            print(f"Error during inference: {e}")
+            break
 
         # Record visible points
         tracks = np.roll(tracks, 1, axis=1)

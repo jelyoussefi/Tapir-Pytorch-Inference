@@ -30,6 +30,7 @@ class TAPIR(nn.Module):
 
     def __init__(
             self,
+            model: nn.Module = None,
             bilinear_interp_with_depthwise_conv: bool = False,
             num_pips_iter: int = 4,
             pyramid_level: int = 1,
@@ -69,12 +70,16 @@ class TAPIR(nn.Module):
         channels_per_group = (64, highres_dim, 256, lowres_dim)
         use_projection = (True, True, True, True)
 
-        self.resnet_torch = nets.ResNet(
-            blocks_per_group=blocks_per_group,
-            channels_per_group=channels_per_group,
-            use_projection=use_projection,
-            strides=strides,
-        )
+        if model is None:
+            self.resnet_torch = nets.ResNet(
+                blocks_per_group=blocks_per_group,
+                channels_per_group=channels_per_group,
+                use_projection=use_projection,
+                strides=strides,
+            )
+        else:
+            self.resnet_torch = model
+
         self.torch_cost_volume_track_mods = nn.ModuleDict({
             'hid1': torch.nn.Conv2d(1, 16, 3, 1, 1),
             'hid2': torch.nn.Conv2d(16, 1, 3, 1, 1),
@@ -326,3 +331,31 @@ class TAPIR(nn.Module):
         occlusion = occlusion[..., 0]
 
         return points, occlusion, expected_dist
+
+
+    def forward_(self, frame: torch.Tensor, query_feats: torch.Tensor, hires_query_feats: torch.Tensor, causal_context: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+        """
+        Forward pass for TAPIR model.
+        
+        Args:
+            frame: Input frame tensor of shape [batch, channels, height, width].
+            query_feats: Query features tensor of shape [batch, num_queries, channels].
+            hires_query_feats: High-resolution query features tensor of shape [batch, num_queries, channels].
+            causal_context: Causal context tensor for PIPS mixer.
+        
+        Returns:
+            Tuple of (points, occlusion, expected_dist, causal_context):
+                - points: Tracked points of shape [batch, num_points, num_frames, 2].
+                - occlusion: Occlusion logits of shape [batch, num_points, num_frames].
+                - expected_dist: Expected distance of shape [batch, num_points, num_frames].
+                - causal_context: Updated causal context tensor.
+        """
+        # Extract feature grids
+        feature_grid, hires_feats_grid = self.get_feature_grids(frame)
+        
+        # Estimate trajectories
+        points, occlusion, expected_dist, causal_context = self.estimate_trajectories(
+            feature_grid, hires_feats_grid, query_feats, hires_query_feats, causal_context
+        )
+        
+        return points, occlusion, expected_dist, causal_context

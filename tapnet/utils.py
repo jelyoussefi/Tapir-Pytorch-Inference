@@ -153,6 +153,8 @@ def convert_grid_coordinates(
     return position_in_grid
 
 def preprocess_frame(frame, resize=(256, 256), device='cuda'):
+    if isinstance(frame, torch.Tensor):
+        frame = frame.cpu().numpy()
     input = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
     input = cv2.resize(input, resize)
     input = input[np.newaxis, :, :, :].astype(np.float32)
