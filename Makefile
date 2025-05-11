@@ -4,7 +4,7 @@ CURRENT_DIR := $(shell dirname $(realpath $(lastword $(MAKEFILE_LIST))))
 CACHE_DIR := $(CURRENT_DIR)/.cache
 MODELS_DIR := /workspace/models
 
-DEVICE ?= CPU
+DEVICE ?= GPU
 
 
 # Docker Configuration

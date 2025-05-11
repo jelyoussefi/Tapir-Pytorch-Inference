@@ -331,31 +331,3 @@ class TAPIR(nn.Module):
         occlusion = occlusion[..., 0]
 
         return points, occlusion, expected_dist
-
-
-    def forward_(self, frame: torch.Tensor, query_feats: torch.Tensor, hires_query_feats: torch.Tensor, causal_context: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
-        """
-        Forward pass for TAPIR model.
-        
-        Args:
-            frame: Input frame tensor of shape [batch, channels, height, width].
-            query_feats: Query features tensor of shape [batch, num_queries, channels].
-            hires_query_feats: High-resolution query features tensor of shape [batch, num_queries, channels].
-            causal_context: Causal context tensor for PIPS mixer.
-        
-        Returns:
-            Tuple of (points, occlusion, expected_dist, causal_context):
-                - points: Tracked points of shape [batch, num_points, num_frames, 2].
-                - occlusion: Occlusion logits of shape [batch, num_points, num_frames].
-                - expected_dist: Expected distance of shape [batch, num_points, num_frames].
-                - causal_context: Updated causal context tensor.
-        """
-        # Extract feature grids
-        feature_grid, hires_feats_grid = self.get_feature_grids(frame)
-        
-        # Estimate trajectories
-        points, occlusion, expected_dist, causal_context = self.estimate_trajectories(
-            feature_grid, hires_feats_grid, query_feats, hires_query_feats, causal_context
-        )
-        
-        return points, occlusion, expected_dist, causal_context
