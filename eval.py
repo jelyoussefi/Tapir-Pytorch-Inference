@@ -128,7 +128,7 @@ def evaluate_model(model, dataset, num_points_per_run=15):
     results = []
     n = num_points_per_run
     
-    for data_idx in tqdm(range(min(10, len(dataset))), desc="Evaluating videos"):
+    for data_idx in tqdm(range(len(dataset)), desc="Evaluating videos"):
         try:
             # Get video data
             video_data = dataset[data_idx]
@@ -384,7 +384,7 @@ def main():
     parser.add_argument('-d', '--dataset', type=str, default='/workspace/dataset/tapvid_davis/',
                        help='Path to the TapVid dataset directory')
     
-    parser.add_argument('--resize', type=int, nargs=2, default=[256, 256],
+    parser.add_argument('--resize', type=int, nargs=2, default=[480, 480],
                        help='Resolution to resize frames to (height width)')
     
     parser.add_argument('--num_points', type=int, default=100,
