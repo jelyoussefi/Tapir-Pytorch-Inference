@@ -42,13 +42,13 @@ pt: 	build
 	@xhost +local:docker
 	@echo "🚀 Running Tapir Inference demo ..."
 	@docker run $(DOCKER_RUN_PARAMS) bash -c \
-		"python3 ./tracker.py -m ./models/causal_bootstapir_checkpoint.pt -i ./videos/streat.mp4 -d ${DEVICE} -p FP32"
+		"python3 ./tracker.py -m ./models/causal_bootstapir_checkpoint.pt -i ./videos/streat.mp4 -d ${DEVICE} -p FP32 "
 
 onnx: 	build
 	@xhost +local:docker
 	@echo "🚀 Running Tapir Inference demo ..."
 	@docker run $(DOCKER_RUN_PARAMS) bash -c \
-		"python3 ./tracker.py -m ./models/causal_bootstapir_checkpoint.onnx -i ./videos/streat.mp4 -d ${DEVICE} -p FP32"
+		"python3 ./tracker.py -m ./models/causal_bootstapir_checkpoint.onnx -i ./videos/streat.mp4 -d ${DEVICE} -p FP32 "
 
 
 int8: 	build
