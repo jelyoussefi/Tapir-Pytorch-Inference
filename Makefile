@@ -1,12 +1,20 @@
 # Settings
 SHELL := /bin/bash
 CURRENT_DIR := $(shell dirname $(realpath $(lastword $(MAKEFILE_LIST))))
-CACHE_DIR := $(CURRENT_DIR)/.cache
 DATASET_DIR := /workspace/dataset
+MODELS_DIR := /workspace/models
 
 
 DEVICE ?= CPU
 
+INPUT_SIZE  ?= 480
+NUM_POINTS ?= 100
+
+PYTORCH_MODEL ?= $(MODELS_DIR)/tapir.pt
+ONNX_MODEL ?= $(MODELS_DIR)/tapir.onnx
+
+INPUT ?= ./videos/streat.mp4
+PRECISION ?= FP32
 
 # Docker Configuration
 DOCKER_IMAGE_NAME := tapir_inference
@@ -30,32 +38,32 @@ DOCKER_BUILD_PARAMS := \
 	-t $(DOCKER_IMAGE_NAME) . 
 
 # Targets
-.PHONY: default build run bash dataset models
+.PHONY: default build run bash dataset models export ov
 
-default: fp32
+default: run
 
 build:
 	@echo "📦 Building Docker image $(DOCKER_IMAGE_NAME)..."
 	@docker build ${DOCKER_BUILD_PARAMS}
 
-pt: 	build
+run : 	build
 	@xhost +local:docker
-	@echo "🚀 Running Tapir Inference demo ..."
+	@echo "🚀 Running Tapir Inference demo in $(PRECISION) ..."
 	@docker run $(DOCKER_RUN_PARAMS) bash -c \
-		"python3 ./tracker.py -m ./models/causal_bootstapir_checkpoint.pt -i ./videos/streat.mp4 -d ${DEVICE} -p FP32 "
+		"python3 ./tracker.py -m $(PYTORCH_MODEL) -i $(INPUT) -d ${DEVICE} -r $(INPUT_SIZE) -n $(NUM_POINTS) -p $(PRECISION)"
 
-onnx: 	build
+ov : 	build
 	@xhost +local:docker
-	@echo "🚀 Running Tapir Inference demo ..."
+	@echo "🚀 Running Tapir Inference demo in $(PRECISION) ..."
 	@docker run $(DOCKER_RUN_PARAMS) bash -c \
-		"python3 ./tracker.py -m ./models/causal_bootstapir_checkpoint.onnx -i ./videos/streat.mp4 -d ${DEVICE} -p FP32 "
+		"python3 ./tracker.py -m $(ONNX_MODEL) -i $(INPUT) -d ${DEVICE} -r $(INPUT_SIZE) -n $(NUM_POINTS) -p $(PRECISION)"
 
-
-int8: 	build
+export: 	build
 	@xhost +local:docker
-	@echo "🚀 Running Tapir Inference demo ..."
+	@echo "🚀 Exporting the Pytorch model to ONNX ..."
 	@docker run $(DOCKER_RUN_PARAMS) bash -c \
-		"python3 ./tracker.py -m ./models/causal_bootstapir_checkpoint_int8.pt -i ./videos/streat.mp4 -d ${DEVICE} -p INT8"
+		"python ./onnx_export.py --model $(PYTORCH_MODEL) --resolution $(INPUT_SIZE) --num_points $(NUM_POINTS) --output_dir $(MODELS_DIR)"
+
 
 dataset:
 	@docker run $(DOCKER_RUN_PARAMS) bash -c \
@@ -65,12 +73,12 @@ dataset:
 quantize: 	build
 	@echo "🚀 Quantizing ..."
 	@docker run $(DOCKER_RUN_PARAMS) bash -c \
-		"python3 ./quantize.py -m ./models/causal_bootstapir_checkpoint.pt "
+		"python3 ./quantize.py -m $(PYTORCH_MODEL) "
 
 eval: 	build
 	@echo "🚀 Evaluating ..."
 	@docker run $(DOCKER_RUN_PARAMS) bash -c \
-		"python3 ./eval.py -m ./models/causal_bootstapir_checkpoint.pt --device ${DEVICE}"
+		"python3 ./eval.py -m $(PYTORCH_MODEL) --device ${DEVICE}"
 
 bash: build
 	@echo "🐚 Starting bash in container ..."
