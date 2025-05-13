@@ -30,7 +30,7 @@ class TAPIR(nn.Module):
 
     def __init__(
             self,
-            model: nn.Module = None,
+            model_path: nn.Module = None,
             bilinear_interp_with_depthwise_conv: bool = False,
             num_pips_iter: int = 4,
             pyramid_level: int = 1,
@@ -41,11 +41,12 @@ class TAPIR(nn.Module):
             initial_resolution: Tuple[int, int] = (256, 256),
             feature_extractor_chunk_size: int = 10,
             extra_convs: bool = True,
-            use_casual_conv: bool = False,
+            use_causal_conv: bool = False,
             device: Optional[torch.device] = None,
     ):
         super().__init__()
 
+        self.model_path = model_path
         self.highres_dim = 128
         self.lowres_dim = 256
         self.bilinear_interp_with_depthwise_conv = (
@@ -60,7 +61,7 @@ class TAPIR(nn.Module):
         self.initial_resolution = tuple(initial_resolution)
         self.feature_extractor_chunk_size = feature_extractor_chunk_size
         self.num_mixer_blocks = num_mixer_blocks
-        self.use_casual_conv = use_casual_conv
+        self.use_causal_conv = use_causal_conv
         self.device = device
 
         highres_dim = 128
@@ -70,7 +71,7 @@ class TAPIR(nn.Module):
         channels_per_group = (64, highres_dim, 256, lowres_dim)
         use_projection = (True, True, True, True)
 
-        if model is None:
+        if self.model_path is None:
             self.resnet_torch = nets.ResNet(
                 blocks_per_group=blocks_per_group,
                 channels_per_group=channels_per_group,
@@ -78,7 +79,7 @@ class TAPIR(nn.Module):
                 strides=strides,
             )
         else:
-            self.resnet_torch = model
+            self.resnet_torch = None 
 
         self.torch_cost_volume_track_mods = nn.ModuleDict({
             'hid1': torch.nn.Conv2d(1, 16, 3, 1, 1),
@@ -90,7 +91,7 @@ class TAPIR(nn.Module):
         dim = 4 + self.highres_dim + self.lowres_dim
         input_dim = dim + (self.pyramid_level + 2) * 49
         self.torch_pips_mixer = nets.PIPSMLPMixer(
-            input_dim, dim, use_causal_conv=self.use_casual_conv
+            input_dim, dim, use_causal_conv=self.use_causal_conv
         )
 
         if extra_convs:
@@ -331,3 +332,4 @@ class TAPIR(nn.Module):
         occlusion = occlusion[..., 0]
 
         return points, occlusion, expected_dist
+

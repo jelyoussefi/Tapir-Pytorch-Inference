@@ -14,7 +14,7 @@ def get_parser():
     parser.add_argument("--model", default="models/causal_bootstapir_checkpoint.pt", type=str,
                         help="path to Tapir checkpoint")
     parser.add_argument("--resolution", default=480, type=int, help="Input resolution")
-    parser.add_argument("--num_points", default=1024, type=int, help="Number of points")
+    parser.add_argument("--num_points", default=100, type=int, help="Number of points")
     parser.add_argument("--dynamic", action="store_true", help="Use dynamic number of points")
     parser.add_argument("--num_iters", default=4, type=int, help="Number of iterations, 1 for faster inference, 4 for better results")
     parser.add_argument("--output_dir", default="./", type=str, help="Output ONNX file")

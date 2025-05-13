@@ -38,17 +38,24 @@ build:
 	@echo "📦 Building Docker image $(DOCKER_IMAGE_NAME)..."
 	@docker build ${DOCKER_BUILD_PARAMS}
 
-fp32: 	build
+pt: 	build
 	@xhost +local:docker
 	@echo "🚀 Running Tapir Inference demo ..."
-	docker run $(DOCKER_RUN_PARAMS) bash -c \
-		"python3 ./example_video_tracking.py -m ./models/causal_bootstapir_checkpoint.pt -i ./videos/streat.mp4 -d ${DEVICE} -p FP32"
+	@docker run $(DOCKER_RUN_PARAMS) bash -c \
+		"python3 ./tracker.py -m ./models/causal_bootstapir_checkpoint.pt -i ./videos/streat.mp4 -d ${DEVICE} -p FP32"
+
+onnx: 	build
+	@xhost +local:docker
+	@echo "🚀 Running Tapir Inference demo ..."
+	@docker run $(DOCKER_RUN_PARAMS) bash -c \
+		"python3 ./tracker.py -m ./models/causal_bootstapir_checkpoint.onnx -i ./videos/streat.mp4 -d ${DEVICE} -p FP32"
+
 
 int8: 	build
 	@xhost +local:docker
 	@echo "🚀 Running Tapir Inference demo ..."
-	docker run $(DOCKER_RUN_PARAMS) bash -c \
-		"python3 ./example_video_tracking.py -m ./models/causal_bootstapir_checkpoint_int8.pt -d ${DEVICE} -p INT8"
+	@docker run $(DOCKER_RUN_PARAMS) bash -c \
+		"python3 ./tracker.py -m ./models/causal_bootstapir_checkpoint_int8.pt -i ./videos/streat.mp4 -d ${DEVICE} -p INT8"
 
 dataset:
 	@docker run $(DOCKER_RUN_PARAMS) bash -c \
@@ -57,7 +64,7 @@ dataset:
 
 quantize: 	build
 	@echo "🚀 Quantizing ..."
-	docker run $(DOCKER_RUN_PARAMS) bash -c \
+	@docker run $(DOCKER_RUN_PARAMS) bash -c \
 		"python3 ./quantize.py -m ./models/causal_bootstapir_checkpoint.pt "
 
 eval: 	build

@@ -24,26 +24,34 @@ import torch
 import intel_extension_for_pytorch as ipex
 from torch import nn
 from tapnet.tapir_model import TAPIR
+from tapnet.tapir_openvino import TAPIR_OpenVINO
 from tapnet.utils import get_query_features, postprocess_occlusions, preprocess_frame
 from openvino.runtime import Core
 
 def build_model(model_path: str, input_resolution: tuple[int, int], num_pips_iter: int, use_causal_conv: bool,
                 device: torch.device, precision: str = "FP32"):
     if model_path is not None:
-        if precision == 'INT8':
-            print(f"Loading INT8 model from {model_path} to device {device}")
-            model = torch.jit.load(model_path, map_location='cpu').to(device)
+        model_ext = os.path.splitext(model_path)[1].lower()
+        
+        if model_ext in ['.onnx', '.xml']:
+            print(f"Using OpenVINO for  model")
+            model = TAPIR_OpenVINO(model_path=model_path, use_causal_conv=use_causal_conv, num_pips_iter=num_pips_iter,
+                                   initial_resolution=input_resolution, device=device)
         else:
-            print(f"Loading FP32 model from {model_path} to device {device}")
-            model = TAPIR(use_casual_conv=use_causal_conv, num_pips_iter=num_pips_iter,
-                          initial_resolution=input_resolution, device=device)
-            model.load_state_dict(torch.load(model_path, weights_only=True, map_location=device))
+            if precision == 'INT8':
+                print(f"Loading INT8 model from {model_path} to device {device}")
+                model = torch.jit.load(model_path, map_location='cpu').to(device)
+            else:
+                print(f"Loading FP32 model from {model_path} to device {device}")
+                model = TAPIR(use_causal_conv=use_causal_conv, num_pips_iter=num_pips_iter,
+                              initial_resolution=input_resolution, device=device)
+                model.load_state_dict(torch.load(model_path, weights_only=True, map_location=device))
 
-        model.to(device)
-        model = model.eval()
+            model.to(device)
+            model = model.eval()
 
-        if str(device).startswith('xpu'):
-            model = ipex.optimize(model, dtype=torch.float32)
+            if str(device).startswith('xpu'):
+                model = ipex.optimize(model, dtype=torch.float32)
 
         return model
     return None
@@ -70,6 +78,7 @@ class TapirPredictor(nn.Module):
             hires_query_feats=hires_query_feats,
             causal_context=causal_context
         )
+        
         visibles = postprocess_occlusions(occlusions, expected_dist)
         return tracks, visibles, causal_context, feature_grid, hires_feats_grid
 
@@ -114,7 +123,7 @@ class TapirInference(nn.Module):
         query_points = torch.tensor(query_points).to(self.device)
 
         num_points = query_points.shape[0]
-        causal_state_shape = (self.num_pips_iter, self.num_mixer_blocks, num_points, 2, 512 + 2048)
+        causal_state_shape = (self.model.num_pips_iter, self.model.num_mixer_blocks, num_points, 2, 512 + 2048)
         self.causal_state = torch.zeros(causal_state_shape, dtype=torch.float32, device=self.device)
         query_feats = torch.zeros((1, num_points, 256), dtype=torch.float32, device=self.device)
         hires_query_feats = torch.zeros((1, num_points, 128), dtype=torch.float32, device=self.device)
@@ -124,31 +133,12 @@ class TapirInference(nn.Module):
         else:
             input_frame = frame
 
-        try:
-            if self.is_quantized:
-                tracks, visibles, causal_state, feature_grid, hires_feats_grid = self.predictor(
-                    input_frame, query_feats, hires_query_feats, self.causal_state
-                )
-            else:
-                _, _, _, feature_grid, hires_feats_grid = self.predictor(
-                    input_frame, query_feats, hires_query_feats, self.causal_state
-                )
+        input_frame = preprocess_frame(frame, resize=self.input_resolution, device=self.device)
+        _, _, _, feature_grid, hires_feats_grid = self.predictor(input_frame, query_feats, hires_query_feats, self.causal_state)
 
-            if self.is_quantized:
-                feature_grid = feature_grid.to(query_points.device)
-                hires_feats_grid = hires_feats_grid.to(query_points.device)
-                self.query_feats, self.hires_query_feats = get_query_features(
-                    query_points[None], feature_grid, hires_feats_grid
-                )
-            else:
-                self.query_feats, self.hires_query_feats = self.encoder(
-                    query_points[None], feature_grid, hires_feats_grid
-                )
+        self.query_feats, self.hires_query_feats = self.encoder(query_points[None], feature_grid, hires_feats_grid)
 
-        except Exception as e:
-            print(f"Error during initialization: {type(e).__name__}: {e}")
-            raise
-
+    
     @torch.no_grad()
     def forward(self, frame: np.ndarray):
         tensor = False
@@ -159,17 +149,13 @@ class TapirInference(nn.Module):
         height, width = frame.shape[:2]
 
         input_frame = preprocess_frame(frame, resize=self.input_resolution, device=self.device)
-        if self.is_quantized:
-            tracks, visibles, self.causal_state, _, _ = self.predictor(
-                input_frame, self.query_feats, self.hires_query_feats, self.causal_state
-            )
-        else:
-            tracks, visibles, self.causal_state, _, _ = self.predictor(
-                input_frame, self.query_feats, self.hires_query_feats, self.causal_state
-            )
+
+        tracks, visibles, self.causal_state, _, _ = self.predictor( input_frame, self.query_feats, self.hires_query_feats, self.causal_state)
+           
 
         visibles = visibles.cpu().numpy().squeeze()
         tracks = tracks.cpu().numpy().squeeze()
+       
         tracks[:, 0] = tracks[:, 0] * width / self.input_resolution[1]
         tracks[:, 1] = tracks[:, 1] * height / self.input_resolution[0]
 
@@ -177,3 +163,4 @@ class TapirInference(nn.Module):
             return tracks, visibles
         else:
             return torch.from_numpy(tracks), torch.from_numpy(visibles)
+
