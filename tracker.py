@@ -10,6 +10,23 @@ import logging
 import tapnet.utils as utils
 from tapnet.tapir_inference import TapirInference
 
+def print_banner(model_path, input_path, device, resolution, num_points, precision):
+    """Print a nice ASCII art banner with application parameters."""
+    banner_width = 60
+    title = "TAPIR Video Tracker"
+    padding = (banner_width - len(title) - 2) // 2
+    
+    print("\n" + "-" * banner_width)
+    print(" " * padding + title + " " * padding)
+    print("-" * banner_width)
+    print(f"  | Model      : {model_path}")
+    print(f"  | Input      : {input_path}")
+    print(f"  | Device     : {device}")
+    print(f"  | Precision  : {precision}")
+    print(f"  | Resolution : {resolution}px")
+    print(f"  | Points     : {num_points}")
+    print("-" * banner_width + "\n")
+
 def select_device(device_arg):
     if device_arg.lower() == 'cpu':
         return torch.device('cpu')
@@ -35,6 +52,9 @@ if __name__ == '__main__':
     parser.add_argument('-r', '--resolution', default=480, type=int, help="Input resolution")
     parser.add_argument('-n', '--num_points', default=100, type=int, help="Number of points")
     args = parser.parse_args()
+
+    # Display banner with application parameters
+    print_banner(args.model, args.input, args.device, args.resolution, args.num_points, args.precision)
 
     # Set device
     device = select_device(args.device)
@@ -86,12 +106,10 @@ if __name__ == '__main__':
     track_length = 30
     tracks = np.zeros((num_points, track_length, 2), dtype=object)
 
-    gui_enabled = True 
-    try:
+    gui_enabled = os.environ.get('DISPLAY') is not None
+    if gui_enabled:
         cv2.namedWindow('frame', cv2.WINDOW_NORMAL)
-    except Exception as e:
-        gui_enabled = False
-
+    
     # FPS calculation variables
     prev_time = time.time()
     fps_avg = 0.0

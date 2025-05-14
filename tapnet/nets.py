@@ -13,41 +13,18 @@
 # limitations under the License.
 # ==============================================================================
 
-"""Optimized PyTorch neural network definitions for Intel GPUs with OpenVINO and IPEX."""
+"""Pytorch neural network definitions."""
 
 from typing import Sequence, Union
 
 import torch
 from torch import nn
 import torch.nn.functional as F
-import intel_extension_for_pytorch as ipex
 
-def fold_instance_norm(conv: nn.Conv2d, norm: nn.InstanceNorm2d):
-    """Folds InstanceNorm2d into Conv2d by adjusting weights and biases, if possible."""
-    # Check if folding is possible (requires running statistics)
-    if not norm.track_running_stats or norm.running_var is None or norm.running_mean is None:
-        return conv, norm  # Return original conv and norm if folding is not possible
-
-    # Extract InstanceNorm parameters
-    gamma = norm.weight.data if norm.affine else torch.ones_like(norm.running_mean)
-    beta = norm.bias.data if norm.affine else torch.zeros_like(norm.running_mean)
-    mean = norm.running_mean
-    var = norm.running_var
-    eps = norm.eps
-
-    # Compute scaling factor for folding
-    scale = gamma / torch.sqrt(var + eps)
-
-    # Adjust Conv2d weights
-    weight = conv.weight.data
-    new_weight = weight * scale.view(-1, 1, 1, 1)
-    conv.weight.data = new_weight
-
-    # Note: No bias adjustment, as Conv2d layers have bias=False
-    return conv, None  # Return folded conv and None to indicate norm is folded
 
 class ExtraConvBlock(nn.Module):
     """Additional convolution block."""
+
     def __init__(
             self,
             channel_dim,
@@ -84,8 +61,10 @@ class ExtraConvBlock(nn.Module):
         x = x.permute(0, 2, 3, 1)
         return x
 
+
 class ExtraConvs(nn.Module):
     """Additional CNN."""
+
     def __init__(
             self,
             num_layers=5,
@@ -106,10 +85,13 @@ class ExtraConvs(nn.Module):
     def forward(self, x):
         for block in self.blocks:
             x = block(x)
+
         return x
+
 
 class ConvChannelsMixer(nn.Module):
     """Linear activation block for PIPs's MLP Mixer."""
+
     def __init__(self, in_channels):
         super().__init__()
         self.mlp2_up = nn.Linear(in_channels, in_channels * 4)
@@ -121,8 +103,10 @@ class ConvChannelsMixer(nn.Module):
         x = self.mlp2_down(x)
         return x
 
+
 class PIPsConvBlock(nn.Module):
     """Convolutional block for PIPs's MLP Mixer."""
+
     def __init__(
             self, in_channels, kernel_shape=3, use_causal_conv=False, block_idx=None
     ):
@@ -144,6 +128,7 @@ class PIPsConvBlock(nn.Module):
             padding=0 if self.use_causal_conv else 1,
             groups=in_channels,
         )
+
         self.mlp1_up_1 = nn.Conv1d(
             in_channels * 4,
             in_channels * 4,
@@ -173,6 +158,7 @@ class PIPsConvBlock(nn.Module):
         x = torch.cat([causal_context_2, x[..., num_extra:, :]], dim=-2)
         new_causal_context = torch.cat([new_causal_context, x[..., -(self.kernel_shape - 1):, :]], dim=-1)
         x = x.permute(0, 2, 1)
+
         x = F.pad(x, (2, 0))
         x = self.mlp1_up_1(x)
         x = x.permute(0, 2, 1)
@@ -184,15 +170,19 @@ class PIPsConvBlock(nn.Module):
         to_skip = x
         x, new_causal_context = self.process_step1(x, causal_context_1)
         x, new_causal_context = self.process_step2(x, causal_context_2, new_causal_context)
+
         x = x + to_skip
         to_skip = x
         x = self.layer_norm_1(x)
         x = self.conv_channels_mixer(x)
+
         x = x + to_skip
         return x, new_causal_context
 
+
 class PIPSMLPMixer(nn.Module):
     """Depthwise-conv version of PIPs's MLP Mixer."""
+
     def __init__(
             self,
             input_channels: int,
@@ -202,6 +192,23 @@ class PIPSMLPMixer(nn.Module):
             kernel_shape: int = 3,
             use_causal_conv: bool = False,
     ):
+        """Inits Mixer module.
+
+        A depthwise-convolutional version of a MLP Mixer for processing images.
+
+        Args:
+            input_channels (int): The number of input channels.
+            output_channels (int): The number of output channels.
+            hidden_dim (int, optional): The dimension of the hidden layer. Defaults
+              to 512.
+            num_blocks (int, optional): The number of convolution blocks in the
+              mixer. Defaults to 12.
+            kernel_shape (int, optional): The size of the kernel in the convolution
+              blocks. Defaults to 3.
+            use_causal_conv (bool, optional): Whether to use causal convolutions.
+              Defaults to False.
+        """
+
         super().__init__()
         self.hidden_dim = hidden_dim
         self.num_blocks = num_blocks
@@ -225,12 +232,15 @@ class PIPSMLPMixer(nn.Module):
         causal_context2 = causal_context[..., step1_size:]
         for i, block in enumerate(self.blocks):
             x, causal_context[i,...] = block(x, causal_context1[i,...], causal_context2[i,...])
+
         x = self.layer_norm(x)
         x = self.linear_1(x)
         return x, causal_context
 
+
 class BlockV2(nn.Module):
-    """Optimized ResNet V2 block with conditional InstanceNorm folding."""
+    """ResNet V2 block."""
+
     def __init__(
             self,
             channels_in: int,
@@ -239,9 +249,16 @@ class BlockV2(nn.Module):
             use_projection: bool,
     ):
         super().__init__()
-        self.padding = (1, 1, 1, 1) if stride == 1 else (0, 2, 0, 2)
-        if stride not in [1, 2]:
-            raise ValueError("Stride must be 1 or 2")
+        self.padding = (1, 1, 1, 1)
+        # Handle assymetric padding created by padding="SAME" in JAX/LAX
+        if stride == 1:
+            self.padding = (1, 1, 1, 1)
+        elif stride == 2:
+            self.padding = (0, 2, 0, 2)
+        else:
+            raise ValueError(
+                'Check correct padding using padtype_to_padsin jax._src.lax.lax'
+            )
 
         self.use_projection = use_projection
         if self.use_projection:
@@ -254,6 +271,13 @@ class BlockV2(nn.Module):
                 bias=False,
             )
 
+        self.bn_0 = nn.InstanceNorm2d(
+            num_features=channels_in,
+            eps=1e-05,
+            momentum=0.1,
+            affine=True,
+            track_running_stats=False,
+        )
         self.conv_0 = nn.Conv2d(
             in_channels=channels_in,
             out_channels=channels_out,
@@ -262,6 +286,7 @@ class BlockV2(nn.Module):
             padding=0,
             bias=False,
         )
+
         self.conv_1 = nn.Conv2d(
             in_channels=channels_out,
             out_channels=channels_out,
@@ -269,14 +294,6 @@ class BlockV2(nn.Module):
             stride=1,
             padding=1,
             bias=False,
-        )
-
-        self.bn_0 = nn.InstanceNorm2d(
-            num_features=channels_in,
-            eps=1e-05,
-            momentum=0.1,
-            affine=True,
-            track_running_stats=False,
         )
         self.bn_1 = nn.InstanceNorm2d(
             num_features=channels_out,
@@ -286,29 +303,27 @@ class BlockV2(nn.Module):
             track_running_stats=False,
         )
 
-        # Attempt to fold InstanceNorm into Conv2d
-        self.conv_0, self.bn_0 = fold_instance_norm(self.conv_0, self.bn_0)
-        self.conv_1, self.bn_1 = fold_instance_norm(self.conv_1, self.bn_1)
-
     def forward(self, inputs):
         x = shortcut = inputs
 
-        if self.bn_0 is not None:
-            x = self.bn_0(x)
+        x = self.bn_0(x)
         x = torch.relu(x)
         if self.use_projection:
             shortcut = self.proj_conv(x)
+
         x = self.conv_0(F.pad(x, self.padding))
 
-        if self.bn_1 is not None:
-            x = self.bn_1(x)
+        x = self.bn_1(x)
         x = torch.relu(x)
+        # no issues with padding here as this layer always has stride 1
         x = self.conv_1(x)
 
         return x + shortcut
 
+
 class BlockGroup(nn.Module):
     """Higher level block for ResNet implementation."""
+
     def __init__(
             self,
             channels_in: int,
@@ -336,8 +351,10 @@ class BlockGroup(nn.Module):
             out = block(out)
         return out
 
+
 class ResNet(nn.Module):
-    """Optimized ResNet model."""
+    """ResNet model."""
+
     def __init__(
             self,
             blocks_per_group: Sequence[int],
@@ -345,7 +362,30 @@ class ResNet(nn.Module):
             use_projection: Sequence[bool] = (True, True, True, True),
             strides: Sequence[int] = (1, 2, 2, 2),
     ):
+        """Initializes a ResNet model with customizable layers and configurations.
+
+        This constructor allows defining the architecture of a ResNet model by
+        setting the number of blocks, channels, projection usage, and strides for
+        each group of blocks within the network. It provides flexibility in
+        creating various ResNet configurations.
+
+        Args:
+          blocks_per_group: A sequence of 4 integers, each indicating the number
+            of residual blocks in each group.
+          channels_per_group: A sequence of 4 integers, each specifying the number
+            of output channels for the blocks in each group. Defaults to (64, 128,
+            256, 512).
+          use_projection: A sequence of 4 booleans, each indicating whether to use
+            a projection shortcut (True) or an identity shortcut (False) in each
+            group. Defaults to (True, True, True, True).
+          strides: A sequence of 4 integers, each specifying the stride size for
+            the convolutions in each group. Defaults to (1, 2, 2, 2).
+
+        The ResNet model created will have 4 groups, with each group's
+        architecture defined by the corresponding elements in these sequences.
+        """
         super().__init__()
+
         self.initial_conv = nn.Conv2d(
             in_channels=3,
             out_channels=channels_per_group[0],
@@ -377,11 +417,5 @@ class ResNet(nn.Module):
         for block_id, block_group in enumerate(self.block_groups):
             out = block_group(out)
             result[f'resnet_unit_{block_id}'] = out
-        return result
 
-    def optimize_for_ipex(self, dtype=torch.float32):
-        """Optimize the model using IPEX."""
-        self.eval()
-        self.to(dtype)
-        optimized_model = ipex.optimize(self, dtype=dtype)
-        return optimized_model
+        return result
