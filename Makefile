@@ -31,11 +31,17 @@ DOCKER_RUN_PARAMS := \
 	-v /tmp/.X11-unix:/tmp/.X11-unix \
 	-v $(CURRENT_DIR):/workspace \
 	-w /workspace \
+	-e http_proxy=$(HTTP_PROXY) \
+	-e https_proxy=$(HTTPS_PROXY) \
+	-e no_proxy=$(NO_PROXY) \
 	$(DOCKER_IMAGE_NAME)
 
 DOCKER_BUILD_PARAMS := \
 	--rm \
 	--network=host \
+	--build-arg http_proxy=$(HTTP_PROXY) \
+	--build-arg https_proxy=$(HTTPS_PROXY) \
+	--build-arg no_proxy=$(NO_PROXY) \
 	-t $(DOCKER_IMAGE_NAME) . 
 
 # Targets
