@@ -102,9 +102,10 @@ class TapirPredictor(nn.Module):
     Processes frames and query features to estimate point trajectories.
     """
 
-    def __init__(self, model: TAPIR):
+    def __init__(self, model: TAPIR, openvino_enabled=False):
         super().__init__()
         self.model = model
+        self.openvino_enabled = openvino_enabled
         self.device = getattr(model, "device", torch.device("cpu"))
 
     @torch.no_grad()
@@ -126,7 +127,7 @@ class TapirPredictor(nn.Module):
         hires_query_feats = hires_query_feats.to(self.device)
         causal_context = causal_context.to(self.device)
 
-        if isinstance(self.model, TAPIR_OpenVINO):
+        if self.openvino_enabled:
             feature_grid, hires_feats_grid = self.model.get_feature_grids(
                 frame, query_feats, hires_query_feats, causal_context
             )
@@ -142,9 +143,7 @@ class TapirPredictor(nn.Module):
         )
 
         visibles = (
-            occlusions
-            if isinstance(self.model, TAPIR_OpenVINO)
-            else postprocess_occlusions(occlusions, expected_dist)
+            occlusions if self.openvino_enabled else postprocess_occlusions(occlusions, expected_dist)
         )
 
         return tracks, visibles, causal_context, feature_grid, hires_feats_grid
@@ -199,10 +198,11 @@ class TapirInference(nn.Module):
         self.num_points = 100
         self.num_mixer_blocks = getattr(self.model, "num_mixer_blocks", 12)
         self.precision = precision
-        self.is_quantized = precision == "INT8"
+        self.openvino_enabled = model_path.endswith(('.onnx', '.xml'))
+        self.is_quantized = not self.openvino_enabled and precision == "INT8"
 
         if not self.is_quantized:
-            self.predictor = TapirPredictor(self.model).to(device)
+            self.predictor = TapirPredictor(self.model, self.openvino_enabled).to(device)
             self.encoder = TapirPointEncoder(self.model).to(device)
         else:
             self.predictor = self.model
@@ -256,7 +256,7 @@ class TapirInference(nn.Module):
         )
 
         input_frame = preprocess_frame(frame, resize=self.input_resolution, device=self.device)
-        if isinstance(self.model, TAPIR_OpenVINO):
+        if self.openvino_enabled:
             feature_grid, hires_feats_grid = self.model.get_feature_grids(
                 input_frame, query_feats, hires_query_feats, self.causal_state
             )

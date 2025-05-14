@@ -10,21 +10,28 @@ import logging
 import tapnet.utils as utils
 from tapnet.tapir_inference import TapirInference
 
+
+# Print a nice ASCII art banner with application parameters in green
 def print_banner(model_path, input_path, device, resolution, num_points, precision):
     """Print a nice ASCII art banner with application parameters."""
     banner_width = 60
     title = "TAPIR Video Tracker"
     padding = (banner_width - len(title) - 2) // 2
+    backend = 'OpenVINO' if model_path.endswith(('.onnx', '.xml')) else 'PyTorch'
+    green = "\033[32m"  
+    red = "\033[31m"
+    reset = "\033[0m"  
     
     print("\n" + "-" * banner_width)
     print(" " * padding + title + " " * padding)
     print("-" * banner_width)
-    print(f"  | Model      : {model_path}")
-    print(f"  | Input      : {input_path}")
-    print(f"  | Device     : {device}")
-    print(f"  | Precision  : {precision}")
-    print(f"  | Resolution : {resolution}px")
-    print(f"  | Points     : {num_points}")
+    print(f"  | Backend    : {red}{backend}{reset}")
+    print(f"  | Model      : {green}{model_path}{reset}")
+    print(f"  | Input      : {green}{input_path}{reset}")
+    print(f"  | Device     : {red}{device}{reset}")
+    print(f"  | Precision  : {green}{precision}{reset}")
+    print(f"  | Resolution : {green}{resolution}px{reset}")
+    print(f"  | Points     : {green}{num_points}{reset}")
     print("-" * banner_width + "\n")
 
 def select_device(device_arg):
@@ -106,7 +113,7 @@ if __name__ == '__main__':
     track_length = 30
     tracks = np.zeros((num_points, track_length, 2), dtype=object)
 
-    gui_enabled = os.environ.get('DISPLAY') is not None
+    gui_enabled = bool(os.environ.get('DISPLAY'))
     if gui_enabled:
         cv2.namedWindow('frame', cv2.WINDOW_NORMAL)
     

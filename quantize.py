@@ -127,7 +127,7 @@ def quantize_model_openvino(model_path, dataset_path, output_path, input_size=(4
     num_points = 100
     num_iters = 4
     num_mixer_blocks = 12
-    device = torch.device('cpu')
+    device = torch.device('xpu')
     
     model_fp32 = TapirInference(model_path, input_size, num_iters, device, "FP32")
     
