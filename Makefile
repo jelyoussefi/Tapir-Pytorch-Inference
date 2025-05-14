@@ -4,17 +4,18 @@ CURRENT_DIR := $(shell dirname $(realpath $(lastword $(MAKEFILE_LIST))))
 DATASET_DIR := /workspace/dataset
 MODELS_DIR := /workspace/models
 
-
 DEVICE ?= CPU
 
 INPUT_SIZE  ?= 480
 NUM_POINTS ?= 100
+NUM_SAMPLES ?= 100
 
-PYTORCH_MODEL ?= $(MODELS_DIR)/tapir.pt
-ONNX_MODEL ?= $(MODELS_DIR)/tapir.onnx
-
-INPUT ?= ./videos/streat.mp4
 PRECISION ?= FP32
+
+PYTORCH_MODEL ?=  $(MODELS_DIR)/$(PRECISION)/tapir.pt
+OPENVINO_MODEL ?= $(MODELS_DIR)/$(PRECISION)/tapir.xml
+
+INPUT ?= ./videos/horse.mp4
 
 # Docker Configuration
 DOCKER_IMAGE_NAME := tapir_inference
@@ -56,24 +57,28 @@ ov : 	build
 	@xhost +local:docker
 	@echo "🚀 Running Tapir Inference demo in $(PRECISION) ..."
 	@docker run $(DOCKER_RUN_PARAMS) bash -c \
-		"python3 ./tracker.py -m $(ONNX_MODEL) -i $(INPUT) -d ${DEVICE} -r $(INPUT_SIZE) -n $(NUM_POINTS) -p $(PRECISION)"
+		"python3 ./tracker.py -m $(OPENVINO_MODEL) -i $(INPUT) -d ${DEVICE} -r $(INPUT_SIZE) -n $(NUM_POINTS) -p $(PRECISION)"
 
 export: 	build
 	@xhost +local:docker
 	@echo "🚀 Exporting the Pytorch model to ONNX ..."
 	@docker run $(DOCKER_RUN_PARAMS) bash -c \
-		"python ./onnx_export.py --model $(PYTORCH_MODEL) --resolution $(INPUT_SIZE) --num_points $(NUM_POINTS) --output_dir $(MODELS_DIR)"
+		"python ./onnx_export.py --model $(MODELS_DIR)/FP32/tapir.pt --resolution $(INPUT_SIZE) --num_points $(NUM_POINTS) --output_dir $(MODELS_DIR)/FP32/ && \
+		 cd $(MODELS_DIR)/FP32/ && ovc tapir.onnx"
 
-
-dataset:
+models: build
+	@docker run $(DOCKER_RUN_PARAMS) bash -c \
+		"./download_models.sh ${MODELS_DIR}/FP32"
+		
+dataset: build
 	@docker run $(DOCKER_RUN_PARAMS) bash -c \
 		"./prepare_dataset.sh ${DATASET_DIR}"
 
 
-quantize: 	build
+quantize:  build models dataset
 	@echo "🚀 Quantizing ..."
 	@docker run $(DOCKER_RUN_PARAMS) bash -c \
-		"python3 ./quantize.py -m $(PYTORCH_MODEL) "
+		"python3 ./quantize.py -m $(MODELS_DIR)/FP32/tapir.xml --resize $(INPUT_SIZE) $(INPUT_SIZE) --num_samples $(NUM_SAMPLES) --output  $(MODELS_DIR)/INT8/tapir.xml"
 
 eval: 	build
 	@echo "🚀 Evaluating ..."

@@ -85,7 +85,12 @@ if __name__ == '__main__':
 
     track_length = 30
     tracks = np.zeros((num_points, track_length, 2), dtype=object)
-    cv2.namedWindow('frame', cv2.WINDOW_NORMAL)
+
+    gui_enabled = True 
+    try:
+        cv2.namedWindow('frame', cv2.WINDOW_NORMAL)
+    except Exception as e:
+        gui_enabled = False
 
     # FPS calculation variables
     prev_time = time.time()
@@ -127,38 +132,41 @@ if __name__ == '__main__':
 
         # Add FPS overlay in top-middle (red text with black background)
         fps_text = f"FPS: {fps_avg:.1f} | Visible: {np.sum(visibles)}/{len(visibles)}"
-        font = cv2.FONT_HERSHEY_SIMPLEX
-        font_scale = 1.5
-        font_thickness = 2
-        text_color = (0, 0, 255)  # Red in BGR
-        text_size, _ = cv2.getTextSize(fps_text, font, font_scale, font_thickness)
-        text_x = (frame.shape[1] - text_size[0]) // 2  # Center horizontally
-        text_y = text_size[1] + 10  # 10 pixels from top
-        # Draw black background rectangle
-        bg_padding = 5
-        cv2.rectangle(
-            frame,
-            (text_x - bg_padding, text_y - text_size[1] - bg_padding),
-            (text_x + text_size[0] + bg_padding, text_y + bg_padding),
-            (0, 0, 0),  # Black in BGR
-            -1
-        )
-        # Draw FPS text
-        cv2.putText(
-            frame,
-            fps_text,
-            (text_x, text_y),
-            font,
-            font_scale,
-            text_color,
-            font_thickness,
-            cv2.LINE_AA
-        )
+        if gui_enabled:
+            font = cv2.FONT_HERSHEY_SIMPLEX
+            font_scale = 1.5
+            font_thickness = 2
+            text_color = (0, 0, 255)  # Red in BGR
+            text_size, _ = cv2.getTextSize(fps_text, font, font_scale, font_thickness)
+            text_x = (frame.shape[1] - text_size[0]) // 2  # Center horizontally
+            text_y = text_size[1] + 10  # 10 pixels from top
+            # Draw black background rectangle
+            bg_padding = 5
+            cv2.rectangle(
+                frame,
+                (text_x - bg_padding, text_y - text_size[1] - bg_padding),
+                (text_x + text_size[0] + bg_padding, text_y + bg_padding),
+                (0, 0, 0),  # Black in BGR
+                -1
+            )
+            # Draw FPS text
+            cv2.putText(
+                frame,
+                fps_text,
+                (text_x, text_y),
+                font,
+                font_scale,
+                text_color,
+                font_thickness,
+                cv2.LINE_AA
+            )
 
-        cv2.imshow('frame', frame)
+            cv2.imshow('frame', frame)
 
-        if cv2.waitKey(1) & 0xFF == ord('q'):
-            break
+            if cv2.waitKey(1) & 0xFF == ord('q'):
+                break
+        else:
+            print(f"\t{fps_text}")        
 
     cap.release()
     cv2.destroyAllWindows()

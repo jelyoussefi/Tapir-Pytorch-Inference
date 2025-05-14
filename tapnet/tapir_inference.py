@@ -27,7 +27,6 @@ from torch import nn
 from tapnet.tapir_model import TAPIR
 from tapnet.tapir_openvino import TAPIR_OpenVINO
 from tapnet.utils import get_query_features, postprocess_occlusions, preprocess_frame
-from openvino.runtime import Core
 
 # Suppress warnings
 os.environ["TF_ENABLE_ONEDNN_OPTS"] = "0"

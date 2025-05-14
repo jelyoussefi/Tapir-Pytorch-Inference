@@ -37,6 +37,7 @@ RUN pip install tqdm
 RUN pip install pandas
 RUN pip install matplotlib
 RUN pip install seaborn
+RUN pip install nncf
 # ----------------------------
 # 9. Set working directory
 # ----------------------------

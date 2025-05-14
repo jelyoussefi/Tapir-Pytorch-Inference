@@ -9,6 +9,10 @@ import numpy as np
 import intel_extension_for_pytorch as ipex
 from intel_extension_for_pytorch.quantization import prepare, convert
 from tqdm import tqdm
+import openvino as ov
+import nncf
+from nncf.parameters import ModelType
+from nncf.quantization import quantize
 
 from tapnet.utils import sample_grid_points, preprocess_frame
 from tapnet.tapir_inference import TapirInference
@@ -22,26 +26,13 @@ class TapirQuantize(torch.nn.Module):
         self.model = tapir_inference
         
     def forward(self, frame, query_feats, hires_query_feats, causal_context):
-        """
-        Forward pass for quantization
-        
-        Args:
-            frame: Input frame tensor [1, 3, H, W]
-            query_feats: Query features [1, N, 256]
-            hires_query_feats: High-resolution query features [1, N, 128]
-            causal_context: Causal context tensor
-            
-        Returns:
-            Tuple of model outputs
-        """
         tracks, visibles, new_causal_context, feature_grid, hires_feats_grid = self.model.predictor(
             frame, query_feats, hires_query_feats, causal_context
         )
         return tracks, visibles, new_causal_context, feature_grid, hires_feats_grid
 
-
 def create_calibration_inputs(model, dataset, device, num_points, num_iters, num_mixer_blocks, 
-                              input_size, max_samples=100, max_frames_per_video=20):
+                             input_size, max_samples=100, max_frames_per_video=20):
     """
     Create calibration inputs from the dataset
     
@@ -57,52 +48,37 @@ def create_calibration_inputs(model, dataset, device, num_points, num_iters, num
         max_frames_per_video: Maximum frames to use from each video
         
     Returns:
-        List of calibration input tuples
+        List of calibration input dictionaries
     """
     calibration_inputs = []
     sample_count = 0
     
-    # Process each video sequence
     for video_idx in tqdm(range(min(len(dataset), max_samples)), desc="Preparing calibration data"):
-        # Get video data
         video_data = dataset[video_idx]
-        video_frames = video_data['rgbs']  # S,H,W,C format
+        video_frames = video_data['rgbs']
         video_id = video_data['vid']
         
-        # Get number of frames in the video
         num_frames = video_frames.shape[0]
         num_frames = min(num_frames, max_frames_per_video)
                 
-        # Get the first frame for initializing points
-        first_frame = video_frames[0].permute(2, 0, 1).unsqueeze(0).to(device)  # Convert to NCHW
-
+        first_frame = video_frames[0].permute(2, 0, 1).unsqueeze(0).to(device)
        
-        # Ensure frame has 3 channels - crucial for OpenCV
         if len(first_frame.shape) != 4 or first_frame.shape[1] != 3:
-            print(f"Warning: Frame has invalid shape for OpenCV: {first_frame.shape}")
+            print(f"Warning: Frame has invalid shape: {first_frame.shape}")
             continue
             
-        # Use trajectory points from the dataset if available
         if 'trajs' in video_data and video_data['trajs'].shape[0] >= num_points:
-            # Get coordinates from first frame
             height, width = input_size
-            trajs = video_data['trajs'][:num_points, 0].numpy()  # Get first frame positions (normalized)
-            
-            # Convert normalized [0,1] to pixel coordinates
+            trajs = video_data['trajs'][:num_points, 0].numpy()
             query_points = np.zeros((num_points, 2), dtype=np.float32)
-            query_points[:, 0] = trajs[:, 0] * width  # x coordinate
-            query_points[:, 1] = trajs[:, 1] * height  # y coordinate
-            
+            query_points[:, 0] = trajs[:, 0] * width
+            query_points[:, 1] = trajs[:, 1] * height
         else:
-            # Sample grid points
             height, width = input_size
             query_points = sample_grid_points(height, width, num_points)
         
-        # Initialize tracking with the first frame
-        # This is the critical part where the OpenCV error occurs
         model.set_points(first_frame, query_points, False)
         
-        # Get initial features and context
         query_feats = model.query_feats.clone()
         hires_query_feats = model.hires_query_feats.clone()
         causal_context = torch.zeros(
@@ -111,62 +87,53 @@ def create_calibration_inputs(model, dataset, device, num_points, num_iters, num
             device=device
         )
         
-        # Process frames sequentially to maintain temporal context
         for frame_idx in range(num_frames):
-            # Convert frame to NCHW format
             frame = video_frames[frame_idx].permute(2, 0, 1).unsqueeze(0).to(device)
             
-            # Add frame to calibration inputs
-            calibration_inputs.append(
-                (frame.clone(), query_feats.clone(), hires_query_feats.clone(), causal_context.clone())
-            )
+            calibration_inputs.append({
+                'input_frame': frame.cpu().numpy(),
+                'query_feats': query_feats.cpu().numpy(),
+                'hires_query_feats': hires_query_feats.cpu().numpy(),
+                'causal_state': causal_context.cpu().numpy()
+            })
             
             sample_count += 1
             
-            # Update tracking state by running inference
             with torch.no_grad():
-                # Use the predictor to update causal context
                 _, _, causal_context, _, _ = model.predictor(
                     frame, query_feats, hires_query_feats, causal_context
                 )
             
-        # Check if we've reached the maximum number of samples
-        if sample_count >= max_samples:
-            print(f"Reached maximum number of samples ({max_samples})")
-            break
+            if sample_count >= max_samples:
+                print(f"Reached maximum number of samples ({max_samples})")
+                break
     
     print(f"Prepared {len(calibration_inputs)} calibration inputs")
     return calibration_inputs
 
-
-def quantize_model(model_path, dataset_path, output_path, input_size=(480, 480), 
-                   num_calibration_samples=100, max_frames_per_video=20):
+def quantize_model_openvino(model_path, dataset_path, output_path, input_size=(480, 480), 
+                           num_calibration_samples=100, max_frames_per_video=20):
     """
-    Quantize TAPIR model using Intel IPEX
+    Quantize OpenVINO model (.onnx or .xml) to INT8 using NNCF
     
     Args:
-        model_path: Path to FP32 model
+        model_path: Path to .onnx or .xml model
         dataset_path: Path to calibration dataset
-        output_path: Path to save quantized model
+        output_path: Directory to save quantized model (.xml and .bin)
         input_size: Input resolution (height, width)
         num_calibration_samples: Number of frames to use for calibration
         max_frames_per_video: Maximum frames to use from each video
     """
-    # Model parameters
-    num_points = 100  # Number of points to track
-    num_iters = 4     # Number of PIP iterations 
-    num_mixer_blocks = 12  # Number of mixer blocks
-    
-    # Always use CPU for quantization
+    num_points = 100
+    num_iters = 4
+    num_mixer_blocks = 12
     device = torch.device('cpu')
     
     model_fp32 = TapirInference(model_path, input_size, num_iters, device, "FP32")
     
-    # Load dataset for calibration
     print(f"Loading dataset from {dataset_path}")
     dataset = TapVidDataset(dataset_path, resize=input_size)
     
-    # Prepare calibration inputs
     print(f"Preparing calibration data using up to {num_calibration_samples} frames")
     calibration_inputs = create_calibration_inputs(
         model_fp32,
@@ -184,14 +151,105 @@ def quantize_model(model_path, dataset_path, output_path, input_size=(480, 480),
         print("No valid calibration inputs were prepared. Aborting quantization.")
         return None
     
-    # Get example input for model preparation
+    core = ov.Core()
+    try:
+        ov_model = core.read_model(model_path)
+    except Exception as e:
+        print(f"Failed to load OpenVINO model: {e}")
+        return None
+    
+    def transform_fn(data_item):
+        """
+        Transform function for NNCF quantization. Returns input data as a dictionary.
+        """
+        return {
+            'input_frame': data_item['input_frame'],
+            'query_feats': data_item['query_feats'],
+            'hires_query_feats': data_item['hires_query_feats'],
+            'causal_state': data_item['causal_state']
+        }
+    
+    quantization_dataset = nncf.Dataset(calibration_inputs, transform_fn)
+    
+    print(f"Calibration dataset size: {len(calibration_inputs)}")
+    print("Starting NNCF quantization")
+    try:
+        quantized_model = quantize(
+            ov_model,
+            quantization_dataset,
+            model_type=ModelType.TRANSFORMER,
+            subset_size=len(calibration_inputs)
+        )
+    except Exception as e:
+        print(f"NNCF quantization failed: {e}")
+        return None
+    
+    os.makedirs(os.path.dirname(os.path.abspath(output_path)), exist_ok=True)
+    print(f"Saving quantized model to {output_path}")
+    ov.serialize(quantized_model, output_path)
+    print("Model saved successfully")
+    
+    return quantized_model
+
+def quantize_model(model_path, dataset_path, output_path, input_size=(480, 480), 
+                   num_calibration_samples=100, max_frames_per_video=20):
+    """
+    Quantize TAPIR model using Intel IPEX or OpenVINO NNCF
+    
+    Args:
+        model_path: Path to FP32 model (.pt, .onnx, or .xml)
+        dataset_path: Path to calibration dataset
+        output_path: Path to save quantized model
+        input_size: Input resolution (height, width)
+        num_calibration_samples: Number of frames to use for calibration
+        max_frames_per_video: Maximum frames to use from each video
+    """
+
+    _, ext = os.path.splitext(model_path)
+    ext = ext.lower()
+    
+    if ext in ('.onnx', '.xml'):
+        return quantize_model_openvino(
+            model_path,
+            dataset_path,
+            output_path,
+            input_size,
+            num_calibration_samples,
+            max_frames_per_video
+        )
+    
+    num_points = 100
+    num_iters = 4
+    num_mixer_blocks = 12
+    device = torch.device('cpu')
+    
+    model_fp32 = TapirInference(model_path, input_size, num_iters, device, "FP32")
+    
+    print(f"Loading dataset from {dataset_path}")
+    dataset = TapVidDataset(dataset_path, resize=input_size)
+    
+    print(f"Preparing calibration data using up to {num_calibration_samples} frames")
+    calibration_inputs = create_calibration_inputs(
+        model_fp32,
+        dataset,
+        device,
+        num_points,
+        num_iters,
+        num_mixer_blocks,
+        input_size,
+        max_samples=num_calibration_samples,
+        max_frames_per_video=max_frames_per_video
+    )
+    
+    if not calibration_inputs:
+        print("No valid calibration inputs were prepared. Aborting quantization.")
+        return None
+    
     example_frame, example_query_feats, example_hires_query_feats, example_causal_context = calibration_inputs[0]
     
-    # Wrap model for quantization
     tapir_quantize = TapirQuantize(model_fp32).to(device)
     tapir_quantize.eval()
     
-    # Configure static quantization
     qconfig_mapping = ipex.quantization.default_static_qconfig_mapping
     
     print("Preparing model for static quantization")
@@ -207,24 +265,20 @@ def quantize_model(model_path, dataset_path, output_path, input_size=(480, 480),
         inplace=False
     )
     
-    # Calibrate model with real data
     print("Starting calibration process")
     prepared_model.eval()
     
     with torch.no_grad():
-        for batch_idx, (cal_frame, cal_query_feats, cal_hires_query_feats, cal_causal_context) in enumerate(
-            tqdm(calibration_inputs, desc="Calibrating model")
+        for cal_frame, cal_query_feats, cal_hires_query_feats, cal_causal_context in tqdm(
+            calibration_inputs, desc="Calibrating model"
         ):
-            # Run calibration
             prepared_model(cal_frame, cal_query_feats, cal_hires_query_feats, cal_causal_context)
     
     print("Calibration completed successfully")
     
-    # Convert model to INT8
     print("Converting model to static INT8")
     quantized_model = convert(prepared_model)
     
-    # Save quantized model
     with torch.no_grad():
         traced_model = torch.jit.trace(
             quantized_model,
@@ -232,52 +286,51 @@ def quantize_model(model_path, dataset_path, output_path, input_size=(480, 480),
             strict=False,
             check_trace=False
         )
-        
-        # Freeze the model to optimize it
         traced_model = torch.jit.freeze(traced_model)
-    
-    # Create output directory if it doesn't exist
+
     os.makedirs(os.path.dirname(os.path.abspath(output_path)), exist_ok=True)
-    
     print(f"Saving quantized model to {output_path}")
     traced_model.save(output_path)
     print("Model saved successfully")
     
-    print(f"Model quantization completed")
+    print("Model quantization completed")
     return quantized_model
-
 
 def main():
     parser = argparse.ArgumentParser(description='Quantize TAPIR model to INT8 using TapVid dataset')
     
     parser.add_argument('-m', '--model', type=str, required=True,
-                        help='Path to input PyTorch model')
+                        help='Path to input model (.pt, .onnx, or .xml)')
     
     parser.add_argument('-d', '--dataset', type=str, default='/workspace/dataset/tapvid_davis/',
                         help='Path to the TapVid dataset directory')
     
-    parser.add_argument('--resize', type=int, nargs=2, default=[256, 256],
+    parser.add_argument('--resize', type=int, nargs=2, default=[480, 480],
                         help='Resolution to resize frames to (height width)')
     
-    parser.add_argument('--num_samples', type=int, default=10,
+    parser.add_argument('--num_samples', type=int, default=300,
                         help='Number of frames to use for calibration')
     
     parser.add_argument('--max_frames_per_video', type=int, default=20,
                         help='Maximum frames to use from each video')
     
     parser.add_argument('-o', '--output', type=str, default=None,
-                        help='Output path for quantized model (default: input_model_static_int8.pt)')
+                        help='Output path for quantized model (directory for OpenVINO, file for PyTorch)')
     
     args = parser.parse_args()
     
-    # Set default output path if not specified
+    _, ext = os.path.splitext(args.model)
+    ext = ext.lower()
+    
     if args.output is None:
-        base, ext = os.path.splitext(args.model)
-        output_path = f"{base}_static_int8{ext}"
+        if ext in ('.onnx', '.xml'):
+            output_path = os.path.splitext(args.model)[0] + '_int8.xml'
+        else:
+            base, ext = os.path.splitext(args.model)
+            output_path = f"{base}_int8{ext}"
     else:
         output_path = args.output
     
-    # Run quantization
     quantize_model(
         args.model,
         args.dataset,
@@ -286,7 +339,6 @@ def main():
         num_calibration_samples=args.num_samples,
         max_frames_per_video=args.max_frames_per_video
     )
-
 
 if __name__ == '__main__':
     main()

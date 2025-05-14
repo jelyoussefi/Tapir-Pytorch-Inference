@@ -19,7 +19,7 @@ from typing import Optional, Tuple
 
 import numpy as np
 import torch
-from openvino.runtime import Core
+from openvino import Core
 from torch import nn, Tensor
 
 from tapnet import utils
