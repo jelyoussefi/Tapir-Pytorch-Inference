@@ -21,6 +21,7 @@ import torch
 import numpy as np
 import cv2
 import openvino as ov
+import openvino.properties.hint as hints
 
 class TapirInferenceOpenVINO():
     def __init__(self, model_path: str, input_resolution: tuple[int, int], num_pips_iter: int, device):
@@ -29,7 +30,7 @@ class TapirInferenceOpenVINO():
         self.num_pips_iter = num_pips_iter
         self.device = device
         self.num_mixer_blocks = 12
-        self.num_points = 100
+        self.num_points = 256
 
         causal_state_shape = (num_pips_iter, self.num_mixer_blocks, self.num_points, 2, 512 + 2048)
         self.causal_state = np.zeros(causal_state_shape, dtype=np.float32)
@@ -37,14 +38,11 @@ class TapirInferenceOpenVINO():
         self.hires_query_feats = np.zeros((1, self.num_points, 128), dtype=np.float32)
 
         self.ov_core = ov.Core()
-        self.ov_model = self.ov_core.read_model(model_path)
-
-        self.compiled_model = self.ov_core.compile_model(self.ov_model, device)
-       
-        # Store input/output names
-        self.input_names = [input.any_name for input in self.ov_model.inputs]
-        self.output_names = [output.any_name for output in self.ov_model.outputs]
         
+        config = {hints.performance_mode: hints.PerformanceMode.THROUGHPUT,
+                  hints.num_requests: "4"}
+
+        self.model = self.ov_core.compile_model(model_path, device, config)
 
     def preprocess_frame(self, frame, resize=(256, 256)):
         input = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
@@ -110,13 +108,13 @@ class TapirInferenceOpenVINO():
     def infer(self,  frame, query_feats, hires_query_feats, causal_state):
         
         inputs = {
-            "frame": frame,
+            "input_frame": frame,
             "query_feats": query_feats,
             "hires_query_feats": hires_query_feats,
             "causal_state": causal_state
         }
 
-        output = self.compiled_model(inputs)
+        output = self.model(inputs)
 
         tracks = output['tracks']
         visibles = output['visibles']
@@ -147,11 +145,6 @@ class TapirInferenceOpenVINO():
         visibles = visibles.squeeze()
         tracks = tracks.squeeze()
 
-        # Scale tracks to original frame dimensions
-        if np.max(tracks, axis=0).any() > 1.0 or np.min(tracks, axis=0).any() < 0.0:
-            tracks = (tracks - np.min(tracks, axis=0)) / (
-                np.max(tracks, axis=0) - np.min(tracks, axis=0) + 1e-6
-            )
         tracks[:, 0] = tracks[:, 0] * width / self.input_resolution[1]
         tracks[:, 1] = tracks[:, 1] * height / self.input_resolution[0]
 

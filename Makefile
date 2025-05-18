@@ -84,13 +84,13 @@ ov: build
 onnx_export: build
 	@echo "🚀 Exporting PyTorch model to ONNX and converting to OpenVINO IR ..."
 	@docker run $(DOCKER_RUN_PARAMS) bash -c \
-		"python ./onnx_export.py --model $(MODELS_DIR)/FP32/tapir.pt --resolution $(INPUT_SIZE) --num_points $(NUM_POINTS) --output_dir $(MODELS_DIR)/FP32/ && \
+		"python3 ./onnx_export.py --model $(MODELS_DIR)/FP32/tapir.pt --resolution $(INPUT_SIZE) --num_points $(NUM_POINTS) --output_dir $(MODELS_DIR)/FP32/ && \
 		cd $(MODELS_DIR)/FP32/ && ovc tapir.onnx"
 
 openvino_export: build
 	@echo "🚀 Exporting PyTorch model to OpenVINO ..."
 	@docker run $(DOCKER_RUN_PARAMS) bash -c \
-		"python ./openvino_export.py --model $(MODELS_DIR)/FP32/tapir.pt --resolution $(INPUT_SIZE) --num_points $(NUM_POINTS) --output_dir $(MODELS_DIR)/FP32/"
+		"python3 ./openvino_export.py --model $(MODELS_DIR)/FP32/tapir.pt --resolution $(INPUT_SIZE) --num_points $(NUM_POINTS) --output_dir $(MODELS_DIR)/FP32/"
 		
 # Download models
 models: build

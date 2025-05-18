@@ -1,20 +1,29 @@
-# Base image with Intel Extension for PyTorch and XPU support
-FROM intel/intel-extension-for-pytorch:2.7.10-xpu
+FROM ubuntu:24.10
 
-# Set non-interactive frontend for Debian package installation
-ENV DEBIAN_FRONTEND=noninteractive
+ARG DEBIAN_FRONTEND=noninteractive
 
-# ----------------------------------
-# 1. Install System Dependencies
-# ----------------------------------
-RUN apt-get update -y && apt-get install -y \
-    software-properties-common \
+USER root
+
+# Install system dependencies
+RUN apt update -y && apt install -y \
+    build-essential \
     wget \
     gpg \
-    libtbb12 \
+    python3-pip \
+    python3-dev \
     python3-opencv \
-    && apt-get clean \
-    && rm -rf /var/lib/apt/lists/*
+    libopencv-dev \
+    libqt5widgets5 \
+    libtbb12 
+
+# ----------------------------------
+# 1. Install Intel Graphic Drivers
+# ----------------------------------
+RUN apt install -y software-properties-common
+RUN add-apt-repository -y ppa:kobuk-team/intel-graphics
+RUN apt install -y libze-intel-gpu1 libze1 intel-metrics-discovery intel-opencl-icd clinfo intel-gsc
+RUN apt install -y intel-media-va-driver-non-free libmfx-gen1 libvpl2 libvpl-tools libva-glx2 va-driver-all vainfo
+RUN apt install -y libze-dev intel-ocloc
 
 # ----------------------------------
 # 2. Install NPU Driver
@@ -26,30 +35,22 @@ RUN wget https://github.com/intel/linux-npu-driver/releases/download/v1.17.0/int
     dpkg -i *.deb && \
     rm -f *.deb
 
+
 # ----------------------------------
 # 3. Install Python Dependencies
 # ----------------------------------
-RUN pip install --no-cache-dir \
+RUN apt install  -y   python3-setuptools 
+RUN pip install --no-cache-dir --break-system-packages \
     --extra-index-url https://storage.openvinotoolkit.org/simple/wheels/nightly openvino
-RUN pip install --no-cache-dir \
-    "numpy<2.0.0" \
-    cap_from_youtube \
-    onnx \
-    onnxruntime \
-    onnxsim
+RUN pip install --no-cache-dir --break-system-packages \
+    nncf \
+    cap_from_youtube 
 
-RUN apt-get update -y && apt-get install -y \
-    libqt5widgets5 \
-    && apt-get clean \
-    && rm -rf /var/lib/apt/lists/*
-
-RUN pip install --no-cache-dir \
-    tqdm \
-    pandas \
-    matplotlib \
-    seaborn \
-    nncf
-
+RUN pip install --break-system-packages \
+	torch --index-url https://download.pytorch.org/whl/cpu
+RUN pip install --break-system-packages \
+	openvino==2024.6.0
+		
 # ----------------------------------
 # 4. Download Sample Video
 # ----------------------------------
@@ -57,10 +58,7 @@ WORKDIR /opt/videos
 RUN wget https://videos.pexels.com/video-files/8624901/8624901-hd_1920_1080_30fps.mp4 && \
     mv 8624901-hd_1920_1080_30fps.mp4 horse.mp4
 
-RUN pip install openvino==2024.6.0
 # ----------------------------------
 # 5. Set Working Directory
 # ----------------------------------
 WORKDIR /workspace
-
-

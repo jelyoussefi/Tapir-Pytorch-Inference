@@ -55,7 +55,7 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Video tracking with TAPIR model')
     parser.add_argument('-m', '--model', type=str, required=True, help='Path to model file (.pt for PyTorch, .onnx or .xml for OpenVINO)')
     parser.add_argument('-i', '--input', type=str, required=True, help='Path to input video file or YouTube URL')
-    parser.add_argument('-d', '--device', type=str, default='GPU', choices=['CPU', 'GPU'], help='Device to run the model on: CPU or GPU')
+    parser.add_argument('-d', '--device', type=str, default='GPU', choices=['CPU', 'GPU', 'NPU'], help='Device to run the model on: CPU or GPU')
     parser.add_argument('-p', '--precision', type=str, default='FP32', choices=['FP32', 'INT8'], help='Model precision: FP32 or INT8')
     parser.add_argument('-r', '--resolution', default=480, type=int, help="Input resolution")
     parser.add_argument('-n', '--num_points', default=100, type=int, help="Number of points")

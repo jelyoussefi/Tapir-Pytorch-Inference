@@ -2,7 +2,7 @@ import numpy as np
 import torch
 from torch import nn
 from tapnet.tapir_model import TAPIR
-from tapnet.utils import get_query_features, postprocess_occlusions
+from tapnet.utils import get_query_features, postprocess_occlusions, preprocess_frame
 
 def build_model(model_path: str, input_resolution: tuple[int, int], num_pips_iter: int, use_casual_conv: bool,
 				device: torch.device):
@@ -84,9 +84,7 @@ class TapirInference(nn.Module):
 		input_frame = preprocess_frame(frame, resize=self.input_resolution, device=self.device)
 		tracks, visibles, self.causal_state, _, _ = self.predictor(input_frame, self.query_feats,
 																   self.hires_query_feats, self.causal_state)
-		print("tracks: ", tracks.shape)
-		print("visibles: ", visibles.shape)
-
+		
 		visibles = visibles.cpu().numpy().squeeze()
 		tracks = tracks.cpu().numpy().squeeze()
 

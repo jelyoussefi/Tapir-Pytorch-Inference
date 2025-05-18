@@ -1,10 +1,10 @@
 import argparse
 import time
-import openvino as ov
-
-import onnx
 import torch
-
+import warnings
+warnings.filterwarnings("ignore", category=torch.jit.TracerWarning, 
+                        message="torch.tensor results are registered as constants in the trace")
+import openvino as ov
 from tapnet.tapir_inference import TapirPredictor, TapirPointEncoder, build_model
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
