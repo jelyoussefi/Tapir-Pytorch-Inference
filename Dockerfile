@@ -57,14 +57,10 @@ WORKDIR /opt/videos
 RUN wget https://videos.pexels.com/video-files/8624901/8624901-hd_1920_1080_30fps.mp4 && \
     mv 8624901-hd_1920_1080_30fps.mp4 horse.mp4
 
+RUN pip install openvino==2024.6.0
 # ----------------------------------
 # 5. Set Working Directory
 # ----------------------------------
 WORKDIR /workspace
 
-# ----------------------------------
-# 6. Add Metadata Labels
-# ----------------------------------
-LABEL maintainer="Your Name <your.email@example.com>"
-LABEL version="1.0"
-LABEL description="Docker image for YOLOX inference with Intel XPU and MMDeploy"
+

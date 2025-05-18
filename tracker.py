@@ -9,6 +9,7 @@ import logging
 
 import tapnet.utils as utils
 from tapnet.tapir_inference import TapirInference
+from tapnet.tapir_openvino import TapirInferenceOpenVINO
 
 
 # Print a nice ASCII art banner with application parameters in green
@@ -64,8 +65,7 @@ if __name__ == '__main__':
     print_banner(args.model, args.input, args.device, args.resolution, args.num_points, args.precision)
 
     # Set device
-    device = select_device(args.device)
-    print(f"Using device: {device}")
+    print(f"Using device: {args.device}")
     
     # Special handling for INT8 models on XPU
     if args.precision == 'INT8' and str(device).startswith('xpu'):
@@ -84,14 +84,18 @@ if __name__ == '__main__':
     cap.set(cv2.CAP_PROP_POS_FRAMES, start_time * cap.get(cv2.CAP_PROP_FPS))
 
     # Initialize model based on file extension
-    try:
-        print(f"Initializing TAPIR model {args.model} with precision {args.precision}...")
-        
-        tapir = TapirInference(args.model, (input_size, input_size), num_iters, device, args.precision)
+    
+    print(f"Initializing TAPIR model {args.model} with precision {args.precision}...")
+     
+
+    model_ext = os.path.splitext(args.model)[1].lower()
+    if model_ext in [".onnx", ".xml"]:
+        tapir = TapirInferenceOpenVINO(args.model, (input_size, input_size), num_iters, args.device)
+    else:
+        device = select_device(args.device)
+        tapir = TapirInference(args.model, (input_size, input_size), num_iters, device)
             
-    except Exception as e:
-        print(f"Error initializing model: {e}")
-        raise
+    
 
     # Initialize query features
     try:
@@ -134,7 +138,6 @@ if __name__ == '__main__':
         
         try:
             tracks_out, visibles = tapir(frame)
-                        
         except Exception as e:
             print(f"Error during inference: {e}")
             break

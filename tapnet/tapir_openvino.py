@@ -16,226 +16,143 @@
 """OpenVINO implementation of TAPIR model for inference."""
 
 from typing import Optional, Tuple
-
-import numpy as np
+import torch.nn.functional as F
 import torch
-from openvino import Core
-from torch import nn, Tensor
+import numpy as np
+import cv2
+import openvino as ov
 
-from tapnet import utils
-from tapnet.tapir_model import TAPIR
-
-
-class TAPIR_OpenVINO(TAPIR):
-    """TAPIR model for OpenVINO inference.
-
-    This class extends the TAPIR model to support inference using OpenVINO,
-    handling model loading, feature extraction, and trajectory estimation.
-    """
-
-    def __init__(
-        self,
-        model_path: str,
-        bilinear_interp_with_depthwise_conv: bool = False,
-        num_pips_iter: int = 4,
-        pyramid_level: int = 1,
-        num_mixer_blocks: int = 12,
-        patch_size: int = 7,
-        softmax_temperature: float = 20.0,
-        parallelize_query_extraction: bool = False,
-        initial_resolution: Tuple[int, int] = (256, 256),
-        feature_extractor_chunk_size: int = 10,
-        extra_convs: bool = True,
-        use_causal_conv: bool = False,
-        device: Optional[torch.device] = None,
-    ):
-        """Initialize TAPIR model for OpenVINO inference.
-
-        Args:
-            model_path: Path to the OpenVINO model (.onnx or .xml).
-            bilinear_interp_with_depthwise_conv: Use bilinear interpolation with depthwise convolution.
-            num_pips_iter: Number of PIPS iterations.
-            pyramid_level: Feature pyramid level.
-            num_mixer_blocks: Number of mixer blocks.
-            patch_size: Patch size for feature extraction.
-            softmax_temperature: Temperature for softmax in attention.
-            parallelize_query_extraction: Parallelize query feature extraction.
-            initial_resolution: Input resolution (height, width).
-            feature_extractor_chunk_size: Chunk size for feature extraction.
-            extra_convs: Use extra convolutional layers.
-            use_causal_conv: Use causal convolutions.
-            device: Torch device (e.g., CPU, GPU).
-        """
-        super().__init__(
-            model_path=model_path,
-            bilinear_interp_with_depthwise_conv=bilinear_interp_with_depthwise_conv,
-            num_pips_iter=num_pips_iter,
-            pyramid_level=pyramid_level,
-            num_mixer_blocks=num_mixer_blocks,
-            patch_size=patch_size,
-            softmax_temperature=softmax_temperature,
-            parallelize_query_extraction=parallelize_query_extraction,
-            initial_resolution=initial_resolution,
-            feature_extractor_chunk_size=feature_extractor_chunk_size,
-            extra_convs=extra_convs,
-            use_causal_conv=use_causal_conv,
-            device=device,
-        )
-
-        self.device = device or torch.device("cpu")
+class TapirInferenceOpenVINO():
+    def __init__(self, model_path: str, input_resolution: tuple[int, int], num_pips_iter: int, device):
+        super().__init__()
+        self.input_resolution = input_resolution
+        self.num_pips_iter = num_pips_iter
+        self.device = device
+        self.num_mixer_blocks = 12
         self.num_points = 100
-        self.ov_core = Core()
 
-        # Initialize storage for inference outputs
-        self.feature_grid = None
-        self.hires_feats_grid = None
-        self.tracks = None
-        self.occlusions = None
-        self.new_causal_context = None
+        causal_state_shape = (num_pips_iter, self.num_mixer_blocks, self.num_points, 2, 512 + 2048)
+        self.causal_state = np.zeros(causal_state_shape, dtype=np.float32)
+        self.query_feats = np.zeros((1, self.num_points, 256), dtype=np.float32)
+        self.hires_query_feats = np.zeros((1, self.num_points, 128), dtype=np.float32)
 
-        # Initialize query features and causal state
-        self.query_feats = torch.zeros(
-            (1, self.num_points, 256), dtype=torch.float32, device=self.device
-        )
-        self.hires_query_feats = torch.zeros(
-            (1, self.num_points, 128), dtype=torch.float32, device=self.device
-        )
-        causal_state_shape = (
-            num_pips_iter,
-            num_mixer_blocks,
-            self.num_points,
-            2,
-            512 + 2048,
-        )
-        self.causal_state = torch.zeros(
-            causal_state_shape, dtype=torch.float32, device=self.device
-        )
+        self.ov_core = ov.Core()
+        self.ov_model = self.ov_core.read_model(model_path)
 
-        # Determine OpenVINO device
-        ov_device = "GPU" if str(self.device).startswith(("xpu", "cuda")) else "CPU"
-
-        # Load and compile OpenVINO model
-        try:
-            ov_model = self.ov_core.read_model(model_path)
-            self.ov_compiled_model = self.ov_core.compile_model(ov_model, ov_device)
-            self.ov_infer_request = self.ov_compiled_model.create_infer_request()
-        except Exception as e:
-            raise RuntimeError(f"Failed to load OpenVINO model: {e}")
-
+        self.compiled_model = self.ov_core.compile_model(self.ov_model, device)
+       
         # Store input/output names
-        self.input_names = [input.any_name for input in self.ov_compiled_model.inputs]
-        self.output_names = [output.any_name for output in self.ov_compiled_model.outputs]
+        self.input_names = [input.any_name for input in self.ov_model.inputs]
+        self.output_names = [output.any_name for output in self.ov_model.outputs]
+        
 
-    def get_feature_grids(
-        self,
-        frame: torch.Tensor,
-        query_feats: torch.Tensor,
-        hires_query_feats: torch.Tensor,
-        causal_state: torch.Tensor,
-    ) -> Tuple[torch.Tensor, torch.Tensor]:
-        """Extract and store feature grids and trajectory outputs.
+    def preprocess_frame(self, frame, resize=(256, 256)):
+        input = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        input = cv2.resize(input, resize)
+        input = input[np.newaxis, :, :, :].astype(np.float32)
+        input = input / 255 * 2 - 1
+        input = input.transpose(0, 3, 1, 2)
+
+        return input
+
+    def map_coordinates_2d(self,feats, coordinates):
+        x = torch.from_numpy(feats.transpose(0, 3, 1, 2))
+
+        y = coordinates[:, :, None, :]
+        y = 2 * (y / x.shape[2:]) - 1
+        y = torch.from_numpy(np.flip(y, axis=-1).astype(np.float32))
+
+        out = F.grid_sample(
+            x, y, mode='bilinear', align_corners=False, padding_mode='border'
+        )
+        out = out.squeeze(dim=-1)
+        out = out.permute(0, 2, 1)
+
+        return out.cpu().numpy()
+
+
+    def get_query_features(self, query_points, feature_grid, hires_feats_grid):
+        position_in_grid = query_points * feature_grid.shape[1:3]
+        position_in_grid_hires = query_points * hires_feats_grid.shape[1:3]
+
+        query_feats = self.map_coordinates_2d(
+            feature_grid, position_in_grid
+        )
+        hires_query_feats = self.map_coordinates_2d(
+            hires_feats_grid, position_in_grid_hires
+        )
+        return query_feats, hires_query_feats
+
+    def set_points(self, frame: np.ndarray, query_points: np.ndarray):
+        """Initialize query points for tracking.
 
         Args:
-            frame: Input frame tensor (1, C, H, W).
-            query_feats: Query features (1, N, 256).
-            hires_query_feats: High-resolution query features (1, N, 128).
-            causal_state: Causal state (num_pips_iter, num_mixer_blocks, N, 2, 2560).
-
-        Returns:
-            Tuple of feature_grid (1, H, W, 256) and hires_feats_grid (1, H, W, 128).
-
-        Raises:
-            RuntimeError: If feature grids are not retrieved.
+            frame: Input frame (H, W, 3).
+            query_points: Query points (N, 2).
+            preprocess: Whether to preprocess the frame.
         """
-        # Prepare inputs for inference
+        query_points = query_points.astype(np.float32)
+        query_points[..., 0] = query_points[..., 0] / self.input_resolution[1]
+        query_points[..., 1] = query_points[..., 1] / self.input_resolution[0]
+
+        num_points = query_points.shape[0]
+        causal_state_shape = ( self.num_pips_iter, self.num_mixer_blocks, num_points, 2, 512 + 2048)
+        self.causal_state = np.zeros( causal_state_shape, dtype=np.float32)
+        query_feats = np.zeros((1, num_points, 256), dtype=np.float32)
+        hires_query_feats = np.zeros( (1, num_points, 128), dtype=np.float32)
+
+        input_frame = self.preprocess_frame(frame, resize=self.input_resolution)
+
+        _, _, _, feature_grid, hires_feats_grid = self.infer(input_frame, query_feats, hires_query_feats, self.causal_state)
+        self.query_feats, self.hires_query_feats = self.get_query_features(query_points[None],feature_grid, hires_feats_grid)
+           
+
+    def infer(self,  frame, query_feats, hires_query_feats, causal_state):
+        
         inputs = {
-            "input_frame": frame.cpu().numpy(),
-            "query_feats": query_feats.cpu().numpy(),
-            "hires_query_feats": hires_query_feats.cpu().numpy(),
-            "causal_state": causal_state.cpu().numpy(),
+            "frame": frame,
+            "query_feats": query_feats,
+            "hires_query_feats": hires_query_feats,
+            "causal_state": causal_state
         }
 
-        # Map inputs to model input names
-        input_dict = {
-            name: inputs.get(name, inputs.get(name.split(":")[0], np.zeros([1])))
-            for name in self.input_names
-        }
+        output = self.compiled_model(inputs)
 
-        # Run inference
-        try:
-            self.ov_infer_request.infer(input_dict)
-        except Exception as e:
-            raise RuntimeError(f"OpenVINO inference failed in get_feature_grids: {e}")
+        tracks = output['tracks']
+        visibles = output['visibles']
+        feature_grid = output['feature_grid']
+        hires_feats_grid = output['hires_feats_grid']
+        causal_state = output['causal_state']
+        
+        return tracks, visibles, causal_state, feature_grid, hires_feats_grid
 
-        # Reset output storage
-        self.feature_grid = None
-        self.hires_feats_grid = None
-        self.tracks = None
-        self.occlusions = None
-        self.new_causal_context = None
-
-        # Store outputs
-        for i, name in enumerate(self.output_names):
-            output = self.ov_infer_request.get_output_tensor(i).data
-            output_tensor = torch.from_numpy(output).to(self.device)
-            if "tracks" in name:
-                self.tracks = output_tensor.squeeze(0)
-            elif "visibles" in name:
-                self.occlusions = output_tensor.squeeze()
-            elif "feature_grid" in name:
-                self.feature_grid = output_tensor
-            elif "hires_feats_grid" in name:
-                self.hires_feats_grid = output_tensor
-            elif "causal_state" in name:
-                self.new_causal_context = output_tensor
-
-        if self.feature_grid is None or self.hires_feats_grid is None:
-            raise RuntimeError("Failed to retrieve feature grids from model outputs")
-
-        return self.feature_grid, self.hires_feats_grid
-
-    def estimate_trajectories(
-        self,
-        feature_grid: torch.Tensor,
-        hires_feats_grid: torch.Tensor,
-        query_feats: torch.Tensor,
-        hires_query_feats: torch.Tensor,
-        causal_context: torch.Tensor,
-    ) -> Tuple[Tensor, Tensor, Tensor, Tensor]:
-        """Process stored trajectory outputs from get_feature_grids.
+    
+    def __call__(self, frame: np.ndarray):
+        """Process a frame to track points.
 
         Args:
-            feature_grid: Feature grid (1, H, W, 256).
-            hires_feats_grid: High-resolution feature grid (1, H, W, 128).
-            query_feats: Query features (1, N, 256).
-            hires_query_feats: High-resolution query features (1, N, 128).
-            causal_context: Causal state (num_pips_iter, num_mixer_blocks, N, 2, 2560).
+            frame: Input frame (H, W, 3) or tensor.
 
         Returns:
-            Tuple of tracks (N, 2), occlusions (N,), expected_dist (N,), and new causal context.
-
-        Raises:
-            RuntimeError: If trajectory outputs are not initialized or tracks shape is invalid.
+            Tuple of tracks (N, 2) and visibles (N,) as numpy arrays or tensors.
         """
-        if (
-            self.tracks is None
-            or self.occlusions is None
-            or self.new_causal_context is None
-        ):
-            raise RuntimeError(
-                "Trajectory outputs not initialized. Call get_feature_grids first."
+        
+        height, width = frame.shape[:2]
+        input_frame = self.preprocess_frame(frame, resize=self.input_resolution)
+
+        tracks, visibles, self.causal_state, _, _ = self.infer(
+            input_frame, self.query_feats, self.hires_query_feats, self.causal_state
+        )
+
+        visibles = visibles.squeeze()
+        tracks = tracks.squeeze()
+
+        # Scale tracks to original frame dimensions
+        if np.max(tracks, axis=0).any() > 1.0 or np.min(tracks, axis=0).any() < 0.0:
+            tracks = (tracks - np.min(tracks, axis=0)) / (
+                np.max(tracks, axis=0) - np.min(tracks, axis=0) + 1e-6
             )
+        tracks[:, 0] = tracks[:, 0] * width / self.input_resolution[1]
+        tracks[:, 1] = tracks[:, 1] * height / self.input_resolution[0]
 
-        tracks = self.tracks.squeeze()
-        if tracks.ndim == 1:
-            tracks = tracks.reshape(-1, 2)
-        if tracks.shape != (self.num_points, 2):
-            raise RuntimeError(f"Unexpected tracks shape: {tracks.shape}")
-
-        occlusions = self.occlusions.squeeze()
-        if occlusions.dtype != torch.bool:
-            occlusions = torch.sigmoid(occlusions) > 0.5
-
-        expected_dist = torch.zeros_like(occlusions, dtype=torch.float32)
-
-        return tracks, occlusions, expected_dist, self.new_causal_context
+        return (tracks, visibles)

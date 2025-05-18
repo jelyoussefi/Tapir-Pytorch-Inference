@@ -63,45 +63,50 @@ default: run
 
 # Build the Docker image
 build:
-	@echo "📦 Building Docker image $(DOCKER_IMAGE_NAME)..."
+	@echo "📦 Building Docker image $(DOCKER_IMAGE_NAME) ..."
 	@docker build $(DOCKER_BUILD_PARAMS)
 
 # Run Tapir inference with PyTorch model
 run: build
-	@echo "🚀 Running Tapir Inference demo in $(PRECISION)..."
+	@echo "🚀 Running Tapir Inference demo in $(PRECISION) ..."
 	@[ -n "$$DISPLAY" ] && xhost +local:root > /dev/null 2>&1 || true
 	@docker run $(DOCKER_RUN_PARAMS) bash -c \
 		"python3 ./tracker.py -m $(PYTORCH_MODEL) -i $(INPUT) -d $(DEVICE) -r $(INPUT_SIZE) -n $(NUM_POINTS) -p $(PRECISION)"
 
 # Run Tapir inference with OpenVINO model
 ov: build
-	@echo "🚀 Running Tapir Inference demo with OpenVINO in $(PRECISION)..."
+	@echo "🚀 Running Tapir Inference demo with OpenVINO in $(PRECISION) ..."
 	@[ -n "$$DISPLAY" ] && xhost +local:root > /dev/null 2>&1 || true
 	@docker run $(DOCKER_RUN_PARAMS) bash -c \
 		"python3 ./tracker.py -m $(OPENVINO_MODEL) -i $(INPUT) -d $(DEVICE) -r $(INPUT_SIZE) -n $(NUM_POINTS) -p $(PRECISION)"
 
 # Export PyTorch model to ONNX and convert to OpenVINO IR
-export: build
-	@echo "🚀 Exporting PyTorch model to ONNX and converting to OpenVINO IR..."
+onnx_export: build
+	@echo "🚀 Exporting PyTorch model to ONNX and converting to OpenVINO IR ..."
 	@docker run $(DOCKER_RUN_PARAMS) bash -c \
 		"python ./onnx_export.py --model $(MODELS_DIR)/FP32/tapir.pt --resolution $(INPUT_SIZE) --num_points $(NUM_POINTS) --output_dir $(MODELS_DIR)/FP32/ && \
 		cd $(MODELS_DIR)/FP32/ && ovc tapir.onnx"
 
+openvino_export: build
+	@echo "🚀 Exporting PyTorch model to OpenVINO ..."
+	@docker run $(DOCKER_RUN_PARAMS) bash -c \
+		"python ./openvino_export.py --model $(MODELS_DIR)/FP32/tapir.pt --resolution $(INPUT_SIZE) --num_points $(NUM_POINTS) --output_dir $(MODELS_DIR)/FP32/"
+		
 # Download models
 models: build
-	@echo "📥 Downloading models to $(MODELS_DIR)/FP32..."
+	@echo "📥 Downloading models to $(MODELS_DIR)/FP32 ..."
 	@docker run $(DOCKER_RUN_PARAMS) bash -c \
 		"./download_models.sh $(MODELS_DIR)/FP32"
 
 # Prepare dataset
 dataset: build
-	@echo "📂 Preparing dataset in $(DATASET_DIR)..."
+	@echo "📂 Preparing dataset in $(DATASET_DIR) ..."
 	@docker run $(DOCKER_RUN_PARAMS) bash -c \
 		"./prepare_dataset.sh $(DATASET_DIR)"
 
 # Quantize the model to INT8
 quantize: build models dataset
-	@echo "⚙️ Quantizing model to INT8..."
+	@echo "⚙️ Quantizing model to INT8 ..."
 	@docker run $(DOCKER_RUN_PARAMS) bash -c \
 		"python3 ./quantize.py -m $(MODELS_DIR)/FP32/tapir.xml --resize $(INPUT_SIZE) $(INPUT_SIZE) --num_samples $(NUM_SAMPLES) --output $(MODELS_DIR)/INT8/tapir.xml"
 

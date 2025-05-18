@@ -93,7 +93,7 @@ if __name__ == '__main__':
     hires_query_feats = hires_query_feats.cpu().numpy()
     causal_state = causal_state.cpu().numpy()
 
-    for i in range(10):
+    for i in range(4):
         start = time.perf_counter()
         outputs = predictor.run(None, {'input_frame': input_frame,
                                           'query_feats': query_feats,
