@@ -106,7 +106,7 @@ def quantize_model(model_path, dataset_path, output_path, input_size=(480, 480),
     num_mixer_blocks = 12
     device = torch.device('cpu')
     
-    model_fp32 = TapirOpenVINO(model_path, input_size, num_iters, "CPU")
+    model_fp32 = TapirOpenVINO(model_path, input_size, num_iters, "GPU")
     
     print(f"Loading dataset from {dataset_path}")
     dataset = TapVidDataset(dataset_path, resize=input_size)
@@ -152,7 +152,8 @@ def quantize_model(model_path, dataset_path, output_path, input_size=(480, 480),
             ov_model,
             quantization_dataset,
             subset_size=len(calibration_inputs),
-            fast_bias_correction=False
+            fast_bias_correction=False,
+            target_device=nncf.TargetDevice.GPU
         )
     except Exception as e:
         print(f"NNCF quantization failed: {e}")

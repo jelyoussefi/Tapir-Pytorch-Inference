@@ -178,7 +178,7 @@ def sample_random_points(height, width, num_points):
 
 
 def postprocess_occlusions(occlusions, expected_dist):
-    visibles = ((1 - F.sigmoid(occlusions)) * (1 - F.sigmoid(expected_dist)) > 0.5).to(torch.uint8)
+    visibles = (1 - F.sigmoid(occlusions)) * (1 - F.sigmoid(expected_dist)) > 0.5 #).to(torch.uint8)
     return visibles
 
 

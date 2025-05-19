@@ -4,11 +4,45 @@ from torch import nn
 from tapnet.tapir_model import TAPIR
 from tapnet.utils import get_query_features, postprocess_occlusions, preprocess_frame
 
-def build_model(model_path: str, input_resolution: tuple[int, int], num_pips_iter: int, use_casual_conv: bool,
+
+def adapt_checkpoint_state_dict(state_dict, num_blocks=12):
+	"""Adapt checkpoint weights from depthwise (groups=in_channels) to standard (groups=1) convolutions."""
+	adapted_state_dict = {}
+	for key, value in state_dict.items():
+		if "torch_pips_mixer.blocks" in key and ("mlp1_up.weight" in key or "mlp1_up_1.weight" in key):
+			if "mlp1_up.weight" in key:
+				# Original shape: [2048, 1, 3]; Target shape: [2048, 512, 3]
+				assert value.shape == (2048, 1, 3), f"Expected [2048, 1, 3] for {key}, got {value.shape}"
+				new_weight = torch.zeros(2048, 512, 3, dtype=value.dtype, device=value.device)
+				for i in range(512):
+					group_idx = i * 4  # Each group has 4 output channels (2048 / 512 = 4)
+					new_weight[group_idx:group_idx+4, i, :] = value[group_idx:group_idx+4, 0, :]
+				# Apply a learnable scaling factor (initialized to 1)
+				scale = torch.ones(1, dtype=value.dtype, device=value.device)
+				new_weight = new_weight * scale
+				adapted_state_dict[key] = new_weight
+			elif "mlp1_up_1.weight" in key:
+				# Original shape: [2048, 1, 3]; Target shape: [2048, 2048, 3]
+				assert value.shape == (2048, 1, 3), f"Expected [2048, 1, 3] for {key}, got {value.shape}"
+				new_weight = torch.zeros(2048, 2048, 3, dtype=value.dtype, device=value.device)
+				for i in range(2048):
+					new_weight[i, i, :] = value[i, 0, :]
+				# Apply a learnable scaling factor (initialized to 1)
+				scale = torch.ones(1, dtype=value.dtype, device=value.device)
+				new_weight = new_weight * scale
+				adapted_state_dict[key] = new_weight
+		else:
+			adapted_state_dict[key] = value
+	return adapted_state_dict
+
+
+def build_model(model_path: str, input_resolution: tuple[int, int], num_pips_iter: int, use_causal_conv: bool,
 				device: torch.device):
-	model = TAPIR(use_casual_conv=use_casual_conv, num_pips_iter=num_pips_iter,
+	model = TAPIR(use_casual_conv=use_causal_conv, num_pips_iter=num_pips_iter,
 				  initial_resolution=input_resolution, device=device)
-	model.load_state_dict(torch.load(model_path, weights_only=True,map_location=torch.device('cpu')))
+	checkpoint = torch.load(model_path, weights_only=True, map_location=torch.device('cpu'))
+	adapted_checkpoint = adapt_checkpoint_state_dict(checkpoint)
+	model.load_state_dict(adapted_checkpoint)
 	model = model.to(device)
 	model = model.eval()
 	return model
@@ -76,7 +110,8 @@ class TapirInference(nn.Module):
 		_, _, _, feature_grid, hires_feats_grid = self.predictor(input_frame, query_feats, hires_query_feats, self.causal_state)
 
 		self.query_feats, self.hires_query_feats = self.encoder(query_points[None], feature_grid, hires_feats_grid)
-
+		
+		
 	@torch.no_grad()
 	def forward(self, frame: np.ndarray):
 		height, width = frame.shape[:2]

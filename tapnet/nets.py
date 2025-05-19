@@ -126,7 +126,7 @@ class PIPsConvBlock(nn.Module):
             kernel_shape,
             stride=1,
             padding=0 if self.use_causal_conv else 1,
-            groups=in_channels,
+            groups=1,
         )
 
         self.mlp1_up_1 = nn.Conv1d(
@@ -135,7 +135,7 @@ class PIPsConvBlock(nn.Module):
             kernel_shape,
             stride=1,
             padding=0 if self.use_causal_conv else 1,
-            groups=in_channels * 4,
+            groups=1,
         )
         self.layer_norm_1 = nn.LayerNorm(
             normalized_shape=in_channels, elementwise_affine=True, bias=False

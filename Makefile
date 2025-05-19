@@ -9,10 +9,10 @@ DATASET_DIR := /workspace/dataset
 MODELS_DIR := /workspace/models
 
 # Default Parameters
-DEVICE      ?= CPU
+DEVICE      ?= GPU
 INPUT_SIZE  ?= 480
 NUM_POINTS  ?= 100
-NUM_SAMPLES ?= 20
+NUM_SAMPLES ?= 5
 PRECISION   ?= FP32
 
 # Model Paths

@@ -67,10 +67,6 @@ if __name__ == '__main__':
     # Set device
     print(f"Using device: {args.device}")
     
-    # Special handling for INT8 models on XPU
-    if args.precision == 'INT8' and str(device).startswith('xpu'):
-        print("Note: Using INT8 model on XPU - quantized operators will run on CPU with inputs/outputs on XPU")
-
     input_size = args.resolution
     num_points = args.num_points
     num_iters = 4  # Use 1 for faster inference, and 4 for better results
@@ -126,6 +122,7 @@ if __name__ == '__main__':
     fps_avg = 0.0
     alpha = 0.1  # Smoothing factor for moving average
     frame_count = 0
+    np.set_printoptions(threshold=np.inf, linewidth=80, suppress=True, precision=2)
 
     while cap.isOpened():
         ret, frame = cap.read()
