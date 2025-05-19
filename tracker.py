@@ -9,7 +9,7 @@ import logging
 
 import tapnet.utils as utils
 from tapnet.tapir_inference import TapirInference
-from tapnet.tapir_openvino import TapirInferenceOpenVINO
+from tapnet.tapir_openvino import TapirOpenVINO
 
 
 # Print a nice ASCII art banner with application parameters in green
@@ -90,7 +90,7 @@ if __name__ == '__main__':
 
     model_ext = os.path.splitext(args.model)[1].lower()
     if model_ext in [".onnx", ".xml"]:
-        tapir = TapirInferenceOpenVINO(args.model, (input_size, input_size), num_iters, args.device)
+        tapir = TapirOpenVINO(args.model, (input_size, input_size), num_iters, args.device)
     else:
         device = select_device(args.device)
         tapir = TapirInference(args.model, (input_size, input_size), num_iters, device)

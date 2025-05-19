@@ -47,10 +47,10 @@ RUN pip install --no-cache-dir --break-system-packages \
     cap_from_youtube 
 
 RUN pip install --break-system-packages \
-	torch --index-url https://download.pytorch.org/whl/cpu
+	torch torchvision --index-url https://download.pytorch.org/whl/cpu
 RUN pip install --break-system-packages \
-	openvino==2024.6.0
-		
+	openvino==2024.6.0 tqdm
+
 # ----------------------------------
 # 4. Download Sample Video
 # ----------------------------------

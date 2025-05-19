@@ -12,7 +12,7 @@ MODELS_DIR := /workspace/models
 DEVICE      ?= CPU
 INPUT_SIZE  ?= 480
 NUM_POINTS  ?= 100
-NUM_SAMPLES ?= 100
+NUM_SAMPLES ?= 20
 PRECISION   ?= FP32
 
 # Model Paths

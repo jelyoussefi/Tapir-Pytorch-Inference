@@ -23,7 +23,7 @@ import cv2
 import openvino as ov
 import openvino.properties.hint as hints
 
-class TapirInferenceOpenVINO():
+class TapirOpenVINO():
     def __init__(self, model_path: str, input_resolution: tuple[int, int], num_pips_iter: int, device):
         super().__init__()
         self.input_resolution = input_resolution
@@ -81,7 +81,7 @@ class TapirInferenceOpenVINO():
         )
         return query_feats, hires_query_feats
 
-    def set_points(self, frame: np.ndarray, query_points: np.ndarray):
+    def set_points(self, frame: np.ndarray, query_points: np.ndarray, preprocess_frame=True):
         """Initialize query points for tracking.
 
         Args:
@@ -99,7 +99,10 @@ class TapirInferenceOpenVINO():
         query_feats = np.zeros((1, num_points, 256), dtype=np.float32)
         hires_query_feats = np.zeros( (1, num_points, 128), dtype=np.float32)
 
-        input_frame = self.preprocess_frame(frame, resize=self.input_resolution)
+        if preprocess_frame:
+            input_frame = self.preprocess_frame(frame, resize=self.input_resolution)
+        else:
+            input_frame = frame
 
         _, _, _, feature_grid, hires_feats_grid = self.infer(input_frame, query_feats, hires_query_feats, self.causal_state)
         self.query_feats, self.hires_query_feats = self.get_query_features(query_points[None],feature_grid, hires_feats_grid)
@@ -108,7 +111,7 @@ class TapirInferenceOpenVINO():
     def infer(self,  frame, query_feats, hires_query_feats, causal_state):
         
         inputs = {
-            "input_frame": frame,
+            "frame": frame,
             "query_feats": query_feats,
             "hires_query_feats": hires_query_feats,
             "causal_state": causal_state

@@ -47,16 +47,15 @@ if __name__ == '__main__':
 	query_feats, hires_query_feats = encoder(query_points[None], feature_grid, hires_feats_grid)
 	tracks, visibles, causal_state, _, _ = predictor(input_frame, query_feats, hires_query_feats, causal_state)
 
-	ov_encoder = ov.convert_model(encoder, example_input=(query_points[None], feature_grid, hires_feats_grid))
-	ov_encoder.reshape({"query_points": [1,num_points,2], 
-						"feature_grid": [1,60,60,256], 
-						"hires_feats_grid": [1,120,120,128]})
+	#ov_encoder = ov.convert_model(encoder, example_input=(query_points[None], feature_grid, hires_feats_grid))
+	#ov_encoder.reshape({"query_points": [1,num_points,2], 
+	#					"feature_grid": [1,60,60,256], 
+	#					"hires_feats_grid": [1,120,120,128]})
 
-	ov_predictor = ov.convert_model(predictor, example_input=(input_frame, query_feats, hires_query_feats, causal_state))
-	ov_predictor.reshape({"frame": [1,3,resolution,resolution], 
-						  "query_feats": [1,num_points,256], 
-						  "hires_query_feats": [1,num_points,128], 
-						  "causal_context": [num_iters,12,num_points,2,2560]})
+	ov_predictor = ov.convert_model(predictor, 
+									example_input=(input_frame, query_feats, hires_query_feats, causal_state),
+									input=[("frame",[1,3,resolution,resolution]), ("query_feats",[1,num_points,256]), 
+									       ("hires_query_feats",[1,num_points,128]),("causal_context",[num_iters,12,num_points,2,2560])])
 
 	# Name predictor outputs using sets
 	for i, output in enumerate(ov_predictor.outputs):
@@ -72,5 +71,5 @@ if __name__ == '__main__':
 			output.get_tensor().set_names({"hires_feats_grid"})
 
 	print(f"Saving models to {args.output_dir}")
-	ov.save_model(ov_encoder, f"{args.output_dir}/tapir_encoder.xml")
+	#ov.save_model(ov_encoder, f"{args.output_dir}/tapir_encoder.xml")
 	ov.save_model(ov_predictor, f"{args.output_dir}/tapir.xml")
