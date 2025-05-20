@@ -7,6 +7,7 @@ import argparse
 import torch
 import numpy as np
 from tqdm import tqdm
+
 import openvino as ov
 import nncf
 from nncf.parameters import ModelType
